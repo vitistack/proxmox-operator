@@ -65,8 +65,12 @@ var _ = BeforeSuite(func() {
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
+	crdDirs := getExistingCRDDirs(
+		filepath.Join("..", "..", "config", "crd", "bases"),
+		filepath.Join("..", "..", "hack", "crds"),
+	)
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths:     crdDirs,
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -113,4 +117,30 @@ func getFirstFoundEnvTestBinaryDir() string {
 		}
 	}
 	return ""
+}
+
+// getExistingCRDDirs returns the subset of provided directories that exist and are non-empty.
+func getExistingCRDDirs(dirs ...string) []string {
+	existing := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		info, err := os.Stat(d)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		// check non-empty
+		entries, err := os.ReadDir(d)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		existing = append(existing, d)
+	}
+	if len(existing) == 0 {
+		logf.Log.Error(nil, "No CRD directory found. Ensure CRDs are present.", "tried", dirs)
+		// Provide actionable guidance in test logs
+		_, _ = GinkgoWriter.Write([]byte("\nNo CRDs found in config/crd/bases or hack/crds.\n" +
+			"Options:\n" +
+			"  1) Run 'make k8s-download-viti-crds' (requires GITHUB_TOKEN) to place CRDs in hack/crds\n" +
+			"  2) Commit CRDs under config/crd/bases\n\n"))
+	}
+	return existing
 }
