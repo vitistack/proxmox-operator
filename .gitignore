@@ -30,3 +30,12 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+bin/
+
+cover.out
+coverage.out
+coverage.html
+cover.html
+
+hack/crds/

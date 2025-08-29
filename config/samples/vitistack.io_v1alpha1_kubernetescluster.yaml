@@ -1,0 +1,9 @@
+apiVersion: vitistack.io.vitistack.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: proxmox-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: kubernetescluster-sample
+spec:
+  # TODO(user): Add fields here

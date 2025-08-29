@@ -1,0 +1,108 @@
+name: Build and Test
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/vitistack
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Configure Git for private repos
+        run: |
+          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Cache bin folder (Go tools and built binaries)
+      - name: Cache bin folder
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-bin-
+
+      - name: Install dependencies
+        run: |
+          go mod download
+        env:
+          GOPRIVATE: github.com/vitistack/*
+          GOPROXY: direct
+
+      - name: Build
+        run: |
+          VERSION="${{ github.ref_type == 'tag' && github.ref_name || '0.0.0' }}"
+          VERSION="${VERSION#v*}"
+          echo "Version $VERSION"
+          make build
+
+      - name: Run security scan
+        run: |
+          if [ ! -f ~/go/bin/govulncheck ]; then
+            echo "Installing govulncheck..."
+            go install golang.org/x/vuln/cmd/govulncheck@latest
+          else
+            echo "Using cached govulncheck"
+          fi
+          govulncheck ./...
+          make go-security-scan
+        env:
+          GOPRIVATE: github.com/vitistack/*
+          GOPROXY: direct
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/vitistack
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Configure Git for private repos
+        run: |
+          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Cache bin folder (Go tools and built binaries)
+      - name: Cache bin folder
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-bin-
+
+      - name: Run tests
+        run: |
+          make test
+          go tool cover -func=cover.out
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: cover.out
+          retention-days: 7
