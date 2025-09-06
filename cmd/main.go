@@ -35,6 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 
 	"github.com/vitistack/proxmox-operator/internal/controller"
@@ -86,7 +87,12 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	_ = vlog.Setup(vlog.Options{Level: "info", ColorizeLine: true, AddCaller: true})
+	defer func() {
+		_ = vlog.Sync()
+	}()
+
+	ctrl.SetLogger(vlog.Logr())
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
