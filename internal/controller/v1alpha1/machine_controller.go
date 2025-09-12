@@ -14,50 +14,63 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package v1alpha1
 
 import (
 	"context"
 
+	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
-	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 )
 
-// KubernetesClusterReconciler reconciles a KubernetesCluster object
-type KubernetesClusterReconciler struct {
+// MachineReconciler reconciles a Machine object
+type MachineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=vitistack.io.vitistack.io,resources=kubernetesclusters,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=vitistack.io.vitistack.io,resources=kubernetesclusters/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=vitistack.io.vitistack.io,resources=kubernetesclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=vitistack.io,resources=machines,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=vitistack.io,resources=machines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the KubernetesCluster object against the actual cluster state, and then
+// the Machine object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
-func (r *KubernetesClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	// Fetch the Machine instance
+	var machine vitistackcrdsv1alpha1.Machine
+	if err := r.Get(ctx, req.NamespacedName, &machine); err != nil {
+		// Ignore not-found errors (object deleted) and requeue nothing
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Only reconcile Machines for provider == "proxmox"
+	provider := machine.Spec.ProviderConfig.Name
+	if provider != "proxmox" {
+		logger.V(1).Info("Skipping Machine: provider is not proxmox", "provider", provider, "name", req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
+
+	// TODO: Add proxmox-specific reconciliation logic here
 
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *KubernetesClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&vitistackcrdsv1alpha1.KubernetesCluster{}).
-		Named("kubernetescluster").
+		For(&vitistackcrdsv1alpha1.Machine{}).
+		Named("machine").
 		Complete(r)
 }

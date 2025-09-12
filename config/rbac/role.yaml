@@ -5,9 +5,9 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - vitistack.io.vitistack.io
+  - vitistack.io
   resources:
-  - kubernetesclusters
+  - machines
   verbs:
   - create
   - delete
@@ -17,15 +17,15 @@ rules:
   - update
   - watch
 - apiGroups:
-  - vitistack.io.vitistack.io
+  - vitistack.io
   resources:
-  - kubernetesclusters/finalizers
+  - machines/finalizers
   verbs:
   - update
 - apiGroups:
-  - vitistack.io.vitistack.io
+  - vitistack.io
   resources:
-  - kubernetesclusters/status
+  - machines/status
   verbs:
   - get
   - patch

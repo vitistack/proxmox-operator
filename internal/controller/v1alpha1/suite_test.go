@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package v1alpha1
 
 import (
 	"context"
@@ -24,16 +24,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
+	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
-	// +kubebuilder:scaffold:imports
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -67,7 +64,7 @@ var _ = BeforeSuite(func() {
 	By("bootstrapping test environment")
 	crdDirs := getExistingCRDDirs(
 		filepath.Join("..", "..", "config", "crd", "bases"),
-		filepath.Join("..", "..", "hack", "crds"),
+		filepath.Join("..", "..", "hack", "vitistack-crds"),
 	)
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     crdDirs,
@@ -137,9 +134,9 @@ func getExistingCRDDirs(dirs ...string) []string {
 	if len(existing) == 0 {
 		logf.Log.Error(nil, "No CRD directory found. Ensure CRDs are present.", "tried", dirs)
 		// Provide actionable guidance in test logs
-		_, _ = GinkgoWriter.Write([]byte("\nNo CRDs found in config/crd/bases or hack/crds.\n" +
+		_, _ = GinkgoWriter.Write([]byte("\nNo CRDs found in config/crd/bases or hack/vitistack-crds.\n" +
 			"Options:\n" +
-			"  1) Run 'make k8s-download-viti-crds' (requires GITHUB_TOKEN) to place CRDs in hack/crds\n" +
+			"  1) Run 'make k8s-download-vitistack-crds' (requires GITHUB_TOKEN) to place CRDs in hack/vitistack-crds\n" +
 			"  2) Commit CRDs under config/crd/bases\n\n"))
 	}
 	return existing

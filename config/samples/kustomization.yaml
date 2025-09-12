@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- vitistack.io_v1alpha1_kubernetescluster.yaml
+  - vitistack.io_v1alpha1_machine.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

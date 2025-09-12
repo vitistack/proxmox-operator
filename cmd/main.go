@@ -21,25 +21,24 @@ import (
 	"flag"
 	"os"
 
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
+	"github.com/vitistack/common/pkg/clients/k8sclient"
+	"github.com/vitistack/common/pkg/loggers/vlog"
+	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	"github.com/vitistack/proxmox-operator/internal/controller/v1alpha1"
+	"github.com/vitistack/proxmox-operator/internal/services/initializeservice"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
+	// to ensure that exec-entrypoint and run can make use of them.
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
-	"github.com/vitistack/common/pkg/loggers/vlog"
-	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
-
-	"github.com/vitistack/proxmox-operator/internal/controller"
-	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -93,6 +92,10 @@ func main() {
 	}()
 
 	ctrl.SetLogger(vlog.Logr())
+
+	k8sclient.Init()
+
+	initializeservice.CheckPrerequisites()
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -185,11 +188,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.KubernetesClusterReconciler{
+	if err := (&v1alpha1.MachineReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "KubernetesCluster")
+		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

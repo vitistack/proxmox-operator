@@ -1,0 +1,22 @@
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: machine-sample
+spec:
+  name: demo-machine
+  instanceType: small
+  cpu:
+    cores: 2
+    sockets: 1
+    threadsPerCore: 1
+  memory: 2147483648 # 2Gi in bytes
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "22.04"
+  network:
+    assignPublicIP: false
+  disks:
+    - name: root
+      sizeGB: 20
+      boot: true
