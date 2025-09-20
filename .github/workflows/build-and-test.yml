@@ -15,14 +15,14 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5.0.0
 
       - name: Configure Git for private repos
         run: |
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v6.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -30,7 +30,7 @@ jobs:
 
       # Cache bin folder (Go tools and built binaries)
       - name: Cache bin folder
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.4
         with:
           path: bin
           key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
@@ -61,7 +61,7 @@ jobs:
           go tool cover -func=cover.out
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: coverage
           path: cover.out
