@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/onsi/ginkgo/v2 v2.25.3
 	github.com/onsi/gomega v1.38.2
-	github.com/vitistack/common v0.0.10
+	github.com/vitistack/common v0.0.11
 	github.com/vitistack/crds v0.1.5
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
