@@ -211,10 +211,10 @@ github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS
 github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
 github.com/ugorji/go/codec v1.3.0 h1:Qd2W2sQawAfG8XSvzwhBeoGq71zXOC/Q1E9y/wUcsUA=
 github.com/ugorji/go/codec v1.3.0/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2Wjqmfxj4=
-github.com/vitistack/common v0.0.11 h1:wrYt0OHeCwayj4BHY+QQ/zeIizkNq9Zy7HXZQiYVGlc=
-github.com/vitistack/common v0.0.11/go.mod h1:kyU2Mx5fD7U44g0CCOqrCWDlxDLh1Jco3bwb5kjsEfA=
-github.com/vitistack/crds v0.1.5 h1:5VTdWzjukBYTvhgQaZ+inGqsog9GUTRAIjU00P6UZIg=
-github.com/vitistack/crds v0.1.5/go.mod h1:lxAT/biit6jbZ0ayM/Z9xg8vy/e9izfEPWLjsu5gm9g=
+github.com/vitistack/common v0.0.12 h1:BYV6vRKPwhJJtalTDoZ520Rx+vxs4WHr7CIy6gM1low=
+github.com/vitistack/common v0.0.12/go.mod h1:OfD19vzAh8E9prlGCeCF3AWiO/7R5nE+Pr1siudP/Ug=
+github.com/vitistack/crds v0.1.6 h1:PAJxZSx1k0dNDTeV828bFtBwLmQZ99jhcREWPjZMABo=
+github.com/vitistack/crds v0.1.6/go.mod h1:p1nyI/panWjRYM2ZBC6SC42c758AowbIjqA8eDkGgw0=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
@@ -315,8 +315,8 @@ google.golang.org/genproto/googleapis/rpc v0.0.0-20250929231259-57b25ae835d4 h1:
 google.golang.org/genproto/googleapis/rpc v0.0.0-20250929231259-57b25ae835d4/go.mod h1:HSkG/KdJWusxU1F6CNrwNDjBMgisKxGnc5dAZfT0mjQ=
 google.golang.org/grpc v1.75.1 h1:/ODCNEuf9VghjgO3rqLcfg8fiOP0nSluljWFlDxELLI=
 google.golang.org/grpc v1.75.1/go.mod h1:JtPAzKiq4v1xcAB2hydNlWI2RnF85XXcV0mhKXr2ecQ=
-google.golang.org/protobuf v1.36.9 h1:w2gp2mA27hUeUzj9Ex9FBjsBm40zfaDtEWow293U7Iw=
-google.golang.org/protobuf v1.36.9/go.mod h1:fuxRtAxBytpl4zzqUh6/eyUujkJdNiuEkXntxiD/uRU=
+google.golang.org/protobuf v1.36.10 h1:AYd7cD/uASjIL6Q9LiTjz8JLcrh/88q5UObnmY3aOOE=
+google.golang.org/protobuf v1.36.10/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
