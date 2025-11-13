@@ -23,7 +23,7 @@ import (
 
 	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
-	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	vitistackcrdsv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/proxmox-operator/internal/controller/v1alpha1"
 	"github.com/vitistack/proxmox-operator/internal/services/initializeservice"
 	"k8s.io/apimachinery/pkg/runtime"

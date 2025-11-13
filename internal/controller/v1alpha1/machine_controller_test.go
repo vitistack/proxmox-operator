@@ -21,7 +21,7 @@ package v1alpha1
 
 // 	. "github.com/onsi/ginkgo/v2"
 // 	. "github.com/onsi/gomega"
-// 	vitistackcrdsv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+// 	vitistackcrdsv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 // 	"k8s.io/apimachinery/pkg/api/errors"
 // 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // 	"k8s.io/apimachinery/pkg/types"
