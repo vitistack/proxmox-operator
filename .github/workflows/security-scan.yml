@@ -2,7 +2,7 @@ name: Security Scan
 
 on:
   schedule:
-    - cron: "0 0 * * 1" # Run weekly on Mondays
+    - cron: '0 0 * * 1' # Run weekly on Mondays
 
 jobs:
   security-scan:
@@ -13,7 +13,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v6
 
       - name: Configure Git for private repos
         run: |
