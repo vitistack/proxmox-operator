@@ -44,6 +44,90 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+          env:
+            # Logging configuration
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logging.level | quote }}
+            - name: LOG_JSON
+              value: {{ .Values.config.logging.json | quote }}
+            # Proxmox connection settings
+            {{- if .Values.existingSecret }}
+            - name: PROXMOX_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: PROXMOX_ENDPOINT
+            - name: PROXMOX_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: PROXMOX_USERNAME
+                  optional: true
+            - name: PROXMOX_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: PROXMOX_PASSWORD
+                  optional: true
+            - name: PROXMOX_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: PROXMOX_TOKEN_ID
+                  optional: true
+            - name: PROXMOX_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: PROXMOX_TOKEN_SECRET
+                  optional: true
+            {{- else }}
+            {{- if .Values.config.proxmox.endpoint }}
+            - name: PROXMOX_ENDPOINT
+              value: {{ .Values.config.proxmox.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.config.proxmox.username }}
+            - name: PROXMOX_USERNAME
+              value: {{ .Values.config.proxmox.username | quote }}
+            {{- end }}
+            {{- if .Values.config.proxmox.password }}
+            - name: PROXMOX_PASSWORD
+              value: {{ .Values.config.proxmox.password | quote }}
+            {{- end }}
+            {{- if .Values.config.proxmox.tokenId }}
+            - name: PROXMOX_TOKEN_ID
+              value: {{ .Values.config.proxmox.tokenId | quote }}
+            {{- end }}
+            {{- if .Values.config.proxmox.tokenSecret }}
+            - name: PROXMOX_TOKEN_SECRET
+              value: {{ .Values.config.proxmox.tokenSecret | quote }}
+            {{- end }}
+            {{- end }}
+            - name: PROXMOX_INSECURE_TLS
+              value: {{ .Values.config.proxmox.insecureTLS | quote }}
+            # VM management settings
+            - name: PROXMOX_VM_ID_START
+              value: {{ .Values.config.vm.idStart | quote }}
+            - name: PROXMOX_NODE_SELECTION
+              value: {{ .Values.config.vm.nodeSelection | quote }}
+            {{- if .Values.config.vm.allowedNodes }}
+            - name: PROXMOX_ALLOWED_NODES
+              value: {{ .Values.config.vm.allowedNodes | quote }}
+            {{- end }}
+            - name: PROXMOX_DEFAULT_STORAGE
+              value: {{ .Values.config.vm.defaultStorage | quote }}
+            - name: PROXMOX_DEFAULT_NETWORK
+              value: {{ .Values.config.vm.defaultNetwork | quote }}
+            - name: PROXMOX_DEFAULT_CPU_TYPE
+              value: {{ .Values.config.vm.defaultCpuType | quote }}
+            - name: PROXMOX_ENABLE_NUMA
+              value: {{ .Values.config.vm.enableNuma | quote }}
+            - name: PROXMOX_SCSI_CONTROLLER
+              value: {{ .Values.config.vm.scsiController | quote }}
+            - name: PROXMOX_ENABLE_QEMU_AGENT
+              value: {{ .Values.config.vm.enableQemuAgent | quote }}
+            - name: PROXMOX_START_ON_CREATE
+              value: {{ .Values.config.vm.startOnCreate | quote }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

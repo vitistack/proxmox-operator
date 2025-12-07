@@ -22,3 +22,13 @@ version: 0.0.0
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
 appVersion: "0.0.0"
+
+# Chart icon - displayed in Helm repository UIs like ArtifactHub
+icon: https://vitistack.io/images/viti1.svg
+keywords:
+  - proxmox
+  - operator
+  - kubernetes
+  - vitistack
+  - vm
+  - virtualization

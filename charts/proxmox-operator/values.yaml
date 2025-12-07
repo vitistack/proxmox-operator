@@ -118,3 +118,56 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# Proxmox Operator Configuration
+# These values are passed as environment variables to the operator
+config:
+  # Logging configuration
+  logging:
+    # Log level (debug, info, warn, error)
+    level: "info"
+    # Output logs in JSON format
+    json: true
+
+  # Proxmox connection settings (required)
+  proxmox:
+    # Proxmox API endpoint URL (e.g., https://proxmox.example.com:8006)
+    endpoint: ""
+    # Authentication - use either username/password OR token
+    # Username authentication (e.g., root@pam)
+    username: ""
+    password: ""
+    # Token authentication (alternative to username/password)
+    tokenId: ""
+    tokenSecret: ""
+    # Skip TLS certificate verification (not recommended for production)
+    insecureTLS: false
+
+  # VM management settings
+  vm:
+    # Starting VM ID for new machines
+    idStart: 2000
+    # Node selection strategy: first, random, round-robin
+    nodeSelection: "first"
+    # Comma-separated list of allowed nodes (empty means all nodes)
+    allowedNodes: ""
+    # Default storage pool for VM disks
+    defaultStorage: "local-lvm"
+    # Default network bridge for VMs
+    defaultNetwork: "vmbr0"
+    # Default CPU type (e.g., host, kvm64, x86-64-v2-AES)
+    defaultCpuType: "x86-64-v2-AES"
+    # Enable NUMA for VMs
+    enableNuma: true
+    # SCSI controller type
+    scsiController: "virtio-scsi-single"
+    # Enable QEMU Guest Agent (required for network status)
+    enableQemuAgent: true
+    # Start VM immediately after creation
+    startOnCreate: true
+
+# Existing secret containing Proxmox credentials
+# If set, the operator will use this secret instead of the values above
+# The secret should contain: PROXMOX_ENDPOINT, PROXMOX_USERNAME, PROXMOX_PASSWORD
+# or PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET
+existingSecret: ""
