@@ -9,8 +9,7 @@ spec:
     family: linux
     distribution: talos
     version: "1.11.5"
-    #imageID: "local:iso/talos-v1.11.5-nocloud-amd64.iso"
-    imageID: "local:iso/talos-v1.12.0-beta.1-qemu-nocloud-amd64.iso"
+    imageID: "local:iso/talos-v1.11.5-nocloud-amd64.iso"
   network:
     assignPublicIP: false
     interfaces:
