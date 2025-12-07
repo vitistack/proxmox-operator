@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -571,7 +572,7 @@ func (r *MachineReconciler) validateISO(ctx context.Context, node string, isoPat
 	}
 
 	// Log available ISOs for debugging
-	var availableISOs []string
+	availableISOs := make([]string, 0, len(content))
 	for _, item := range content {
 		availableISOs = append(availableISOs, item.Volid)
 	}
@@ -653,12 +654,17 @@ func (r *MachineReconciler) updateVMStatus(ctx context.Context, machine *vitista
 
 	// Update CPU count
 	if vm.CPUs > 0 {
-		machine.Status.CPUs = int(vm.CPUs)
+		machine.Status.CPUs = vm.CPUs
 	}
 
 	// Update memory (Proxmox returns memory in bytes)
+	// Safe conversion: cap at MaxInt64 to prevent overflow (practically unreachable for real memory)
 	if vm.MaxMem > 0 {
-		machine.Status.Memory = int64(vm.MaxMem)
+		if vm.MaxMem <= math.MaxInt64 {
+			machine.Status.Memory = int64(vm.MaxMem)
+		} else {
+			machine.Status.Memory = math.MaxInt64
+		}
 	}
 
 	// Set provider info

@@ -57,6 +57,10 @@ jobs:
           path: cover.out
           retention-days: 7
 
+      - name: Run gosec
+        run: |
+          make gosec
+
       - name: Run security scan
         run: |
-          make go-security-scan
+          make govulncheck
