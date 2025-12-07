@@ -1,0 +1,22 @@
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: debian-13-vm
+spec:
+  name: debian-13-vm
+  machineClass: small
+  os:
+    family: linux
+    distribution: debian
+    version: "13.2"
+    imageID: "local:iso/debian-13.2.0-amd64-netinst.iso"
+  network:
+    assignPublicIP: false
+    interfaces:
+    - name: eth0
+      primary: true
+  disks:
+  - name: root
+    sizeGB: 10
+    boot: true
+  provider: proxmox

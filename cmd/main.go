@@ -21,11 +21,15 @@ import (
 	"flag"
 	"os"
 
+	"github.com/spf13/viper"
 	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackcrdsv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/proxmox-operator/internal/consts"
 	"github.com/vitistack/proxmox-operator/internal/controller/v1alpha1"
 	"github.com/vitistack/proxmox-operator/internal/services/initializeservice"
+	"github.com/vitistack/proxmox-operator/internal/services/proxmox"
+	"github.com/vitistack/proxmox-operator/internal/settings"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -55,6 +59,30 @@ func init() {
 
 // nolint:gocyclo
 func main() {
+	settings.Init()
+	vlog.Info("Starting proxmox operator")
+
+	// Initialize k8sclient
+	k8sclient.Init()
+
+	// Set up the logger
+	_ = vlog.Setup(vlog.Options{
+		Level:             viper.GetString(consts.LOG_LEVEL),
+		ColorizeLine:      viper.GetBool(consts.LOG_COLORIZE_LINE),
+		AddCaller:         viper.GetBool(consts.LOG_ADD_CALLER),
+		DisableStacktrace: viper.GetBool(consts.LOG_DISABLE_STACKTRACE),
+		UnescapeMultiline: viper.GetBool(consts.LOG_UNESCAPED_MULTILINE),
+		JSON:              viper.GetBool(consts.LOG_JSON),
+	})
+	defer func() {
+		_ = vlog.Sync()
+	}()
+
+	// set the controller-runtime logger
+	ctrl.SetLogger(vlog.Logr()) // vlog logger
+
+	initializeservice.CheckPrerequisites()
+
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
@@ -85,17 +113,6 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
-	_ = vlog.Setup(vlog.Options{Level: "info", ColorizeLine: true, AddCaller: true})
-	defer func() {
-		_ = vlog.Sync()
-	}()
-
-	ctrl.SetLogger(vlog.Logr())
-
-	k8sclient.Init()
-
-	initializeservice.CheckPrerequisites()
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -188,9 +205,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create Proxmox client using Viper configuration
+	proxmoxClient, err := proxmox.NewProxmoxClientFromConfig(
+		viper.GetString(consts.PROXMOX_ENDPOINT),
+		viper.GetString(consts.PROXMOX_USERNAME),
+		viper.GetString(consts.PROXMOX_PASSWORD),
+		viper.GetBool(consts.PROXMOX_INSECURE_TLS),
+	)
+	if err != nil {
+		setupLog.Error(err, "unable to create Proxmox client")
+		os.Exit(1)
+	}
+
 	if err := (&v1alpha1.MachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		ProxmoxClient: proxmoxClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)

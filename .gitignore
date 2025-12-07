@@ -40,3 +40,9 @@ cover.html
 
 hack/crds/
 hack/vitistack-crds/
+
+*.env*
+!.env.example
+
+__debug_bin*
+
