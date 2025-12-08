@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -30,9 +31,11 @@ import (
 	"github.com/vitistack/proxmox-operator/internal/services/initializeservice"
 	"github.com/vitistack/proxmox-operator/internal/services/proxmox"
 	"github.com/vitistack/proxmox-operator/internal/settings"
+	"github.com/vitistack/proxmox-operator/pkg/macaddress"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -210,6 +213,8 @@ func main() {
 		viper.GetString(consts.PROXMOX_ENDPOINT),
 		viper.GetString(consts.PROXMOX_USERNAME),
 		viper.GetString(consts.PROXMOX_PASSWORD),
+		viper.GetString(consts.PROXMOX_TOKEN_ID),
+		viper.GetString(consts.PROXMOX_TOKEN_SECRET),
 		viper.GetBool(consts.PROXMOX_INSECURE_TLS),
 	)
 	if err != nil {
@@ -217,10 +222,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create MAC address generator
+	macAddressGenerator := macaddress.NewVitistackMacGenerator()
+	setupLog.Info("MAC address generator initialized")
+
 	if err := (&v1alpha1.MachineReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		ProxmoxClient: proxmoxClient,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		ProxmoxClient:       proxmoxClient,
+		MacAddressGenerator: macAddressGenerator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)
@@ -236,9 +246,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Add runnable to ensure MachineProvider exists after manager cache is synced
+	if err := mgr.Add(&machineProviderInitializer{client: mgr.GetClient()}); err != nil {
+		setupLog.Error(err, "unable to add MachineProvider initializer")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// machineProviderInitializer implements manager.Runnable to initialize MachineProvider after cache sync
+type machineProviderInitializer struct {
+	client client.Client
+}
+
+// Start is called when the manager starts and the cache is synced
+func (m *machineProviderInitializer) Start(ctx context.Context) error {
+	setupLog.Info("Initializing MachineProvider from VitiStack...")
+
+	if err := initializeservice.EnsureMachineProvider(ctx, m.client); err != nil {
+		setupLog.Error(err, "Failed to ensure MachineProvider exists")
+		// Non-fatal error, don't return it to avoid stopping the manager
+		return nil
+	}
+
+	return nil
 }

@@ -155,6 +155,14 @@ config:
     defaultStorage: "local-lvm"
     # Default network bridge for VMs
     defaultNetwork: "vmbr0"
+    # Network model for VM interfaces (virtio, e1000, e1000e, rtl8139, vmxnet3)
+    # virtio = VirtIO paravirtualized (best performance)
+    networkModel: "virtio"
+    # Default VLAN tag for VM network interfaces (empty = no VLAN tagging)
+    defaultVlan: ""
+    # Default MTU for VM network interfaces (0 = use Proxmox default of 1500)
+    # Common values: 1500 (standard), 9000 (jumbo frames)
+    defaultMtu: 0
     # Default CPU type (e.g., host, kvm64, x86-64-v2-AES)
     defaultCpuType: "x86-64-v2-AES"
     # Enable NUMA for VMs
@@ -165,6 +173,16 @@ config:
     enableQemuAgent: true
     # Start VM immediately after creation
     startOnCreate: true
+
+  # Network configuration settings
+  network:
+    # IP address source for VMs:
+    # - "proxmox": Get IP from Proxmox/QEMU Guest Agent (default)
+    # - "networkconfiguration": Get IP from NetworkConfiguration CRD (Kea DHCP reservation)
+    ipSource: "proxmox"
+    # Second octet for MAC address generation (format: 02:XX:RR:RR:RR:RR where XX is this value)
+    # Default is 24 (0x18 in hex), resulting in MAC addresses like 02:18:XX:XX:XX:XX
+    macSet: "24"
 
 # Existing secret containing Proxmox credentials
 # If set, the operator will use this secret instead of the values above

@@ -90,35 +90,42 @@ LOG_JSON=true
 
 ### Configuration Reference
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PROXMOX_ENDPOINT` | - | Proxmox API endpoint URL (including /api2/json) |
-| `PROXMOX_USERNAME` | - | Proxmox username (e.g., `root@pam`) |
-| `PROXMOX_PASSWORD` | - | Proxmox password |
-| `PROXMOX_TOKEN_ID` | - | API token ID (alternative auth) |
-| `PROXMOX_TOKEN_SECRET` | - | API token secret (alternative auth) |
-| `PROXMOX_INSECURE_TLS` | `false` | Skip TLS certificate verification |
-| `PROXMOX_VM_ID_START` | `2000` | Starting VM ID for new machines |
-| `PROXMOX_NODE_SELECTION` | `first` | Node selection strategy (`first`, `random`, `round-robin`) |
-| `PROXMOX_ALLOWED_NODES` | - | Comma-separated list of allowed nodes |
-| `PROXMOX_DEFAULT_STORAGE` | `local-lvm` | Default storage pool for VM disks |
-| `PROXMOX_DEFAULT_NETWORK` | `vmbr0` | Default network bridge for VMs |
-| `PROXMOX_DEFAULT_CPU_TYPE` | `x86-64-v2-AES` | CPU type for VMs (e.g., `host`, `kvm64`) |
-| `PROXMOX_ENABLE_NUMA` | `false` | Enable NUMA for VMs |
-| `PROXMOX_SCSI_CONTROLLER` | `virtio-scsi-single` | SCSI controller type |
-| `PROXMOX_ENABLE_QEMU_AGENT` | `true` | Enable QEMU Guest Agent |
-| `PROXMOX_START_ON_CREATE` | `true` | Start VM immediately after creation |
+| Variable                    | Default              | Description                                                            |
+| --------------------------- | -------------------- | ---------------------------------------------------------------------- |
+| `PROXMOX_ENDPOINT`          | -                    | Proxmox API endpoint URL (including /api2/json)                        |
+| `PROXMOX_USERNAME`          | -                    | Proxmox username (e.g., `root@pam`)                                    |
+| `PROXMOX_PASSWORD`          | -                    | Proxmox password                                                       |
+| `PROXMOX_TOKEN_ID`          | -                    | API token ID (alternative auth)                                        |
+| `PROXMOX_TOKEN_SECRET`      | -                    | API token secret (alternative auth)                                    |
+| `PROXMOX_INSECURE_TLS`      | `false`              | Skip TLS certificate verification                                      |
+| `PROXMOX_VM_ID_START`       | `2000`               | Starting VM ID for new machines                                        |
+| `PROXMOX_NODE_SELECTION`    | `first`              | Node selection strategy (`first`, `random`, `round-robin`)             |
+| `PROXMOX_ALLOWED_NODES`     | -                    | Comma-separated list of allowed nodes                                  |
+| `PROXMOX_DEFAULT_STORAGE`   | `local-lvm`          | Default storage pool for VM disks                                      |
+| `PROXMOX_DEFAULT_NETWORK`   | `vmbr0`              | Default network bridge for VMs                                         |
+| `PROXMOX_NETWORK_MODEL`     | `virtio`             | Network model (`virtio`, `e1000`, `e1000e`, `rtl8139`, `vmxnet3`)      |
+| `PROXMOX_DEFAULT_VLAN`      | `0`                  | Fallback VLAN if no NetworkNamespace found (0 = no VLAN tagging)       |
+| `PROXMOX_DEFAULT_MTU`       | `0`                  | Default MTU (0 = Proxmox default 1500, common: 1500, 9000)             |
+| `PROXMOX_DEFAULT_CPU_TYPE`  | `x86-64-v2-AES`      | CPU type for VMs (e.g., `host`, `kvm64`)                               |
+| `PROXMOX_ENABLE_NUMA`       | `true`               | Enable NUMA for VMs                                                    |
+| `PROXMOX_SCSI_CONTROLLER`   | `virtio-scsi-single` | SCSI controller type                                                   |
+| `PROXMOX_ENABLE_QEMU_AGENT` | `true`               | Enable QEMU Guest Agent                                                |
+| `PROXMOX_START_ON_CREATE`   | `true`               | Start VM immediately after creation                                    |
+| `IP_SOURCE`                 | `proxmox`            | IP source: `proxmox` (QEMU agent) or `networkconfiguration` (Kea DHCP) |
+| `MAC_SET`                   | `24`                 | Second octet for generated MAC addresses (format: `02:XX:...`)         |
 
 ## 🚀 Usage
 
 ### Basic VM Creation
 
 1. **Ensure MachineClasses are available**:
+
    ```bash
    kubectl get machineclasses
    ```
 
 2. **Create a Machine**:
+
    ```yaml
    apiVersion: vitistack.io/v1alpha1
    kind: Machine
@@ -127,21 +134,21 @@ LOG_JSON=true
      namespace: default
    spec:
      name: my-proxmox-vm
-     machineClass: small  # Uses pre-installed machineclass
+     machineClass: small # Uses pre-installed machineclass
      os:
        family: linux
        distribution: debian
        version: "12"
-       imageID: "local:iso/debian-12-netinst.iso"  # Must be uploaded to Proxmox
+       imageID: "local:iso/debian-12-netinst.iso" # Must be uploaded to Proxmox
      network:
        assignPublicIP: false
        interfaces:
-       - name: eth0
-         primary: true
+         - name: eth0
+           primary: true
      disks:
-     - name: root
-       sizeGB: 20
-       boot: true
+       - name: root
+         sizeGB: 20
+         boot: true
      provider: proxmox
    ```
 
@@ -154,6 +161,7 @@ LOG_JSON=true
 ### Advanced Examples
 
 See the [`examples/`](./examples/) directory for complete examples including:
+
 - Debian netinstall VM creation
 - MachineClass definitions
 - Configuration templates
@@ -171,18 +179,18 @@ The operator populates comprehensive status information from the Proxmox VM:
 ```yaml
 status:
   phase: Running
-  state: running              # VM state from Proxmox (running, stopped, paused)
+  state: running # VM state from Proxmox (running, stopped, paused)
   providerID: proxmox://pve1/2001
   machineID: "2001"
   provider: proxmox
   hostname: my-proxmox-vm
-  region: pve1                # Proxmox node name
-  zone: pve1                  # Proxmox node name
+  region: pve1 # Proxmox node name
+  zone: pve1 # Proxmox node name
   cpus: 4
-  memory: 4294967296          # Memory in bytes
+  memory: 4294967296 # Memory in bytes
   creationTime: "2025-12-07T10:00:00Z"
   lastUpdated: "2025-12-07T10:05:00Z"
-  
+
   # Network information (requires QEMU Guest Agent)
   ipAddresses:
     - 192.168.1.100
@@ -200,7 +208,7 @@ status:
         - "2001:db8::1"
       state: up
       type: ethernet
-  
+
   conditions:
     - type: Ready
       status: "True"
@@ -211,24 +219,24 @@ status:
 
 #### Status Field Reference
 
-| Field | Description |
-|-------|-------------|
-| `phase` | Current lifecycle phase (`Pending`, `Creating`, `Running`, `Terminating`, `Terminated`, `Failed`) |
-| `state` | VM state from Proxmox (`running`, `stopped`, `paused`) |
-| `providerID` | Unique identifier in format `proxmox://node/vmid` |
-| `machineID` | Proxmox VM ID |
-| `provider` | Always `proxmox` for this operator |
-| `hostname` | VM name from Proxmox |
-| `region` / `zone` | Proxmox node name where VM is running |
-| `cpus` | Number of CPU cores assigned |
-| `memory` | Memory in bytes |
-| `creationTime` | When the VM was created |
-| `lastUpdated` | Last status sync timestamp |
-| `ipAddresses` | All IPv4 addresses (requires QEMU Guest Agent) |
-| `ipv6Addresses` | All IPv6 addresses (requires QEMU Guest Agent) |
-| `privateIPAddresses` | RFC 1918 private IPv4 addresses |
-| `publicIPAddresses` | Public IPv4 addresses |
-| `networkInterfaces` | Detailed per-interface network info |
+| Field                | Description                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `phase`              | Current lifecycle phase (`Pending`, `Creating`, `Running`, `Terminating`, `Terminated`, `Failed`) |
+| `state`              | VM state from Proxmox (`running`, `stopped`, `paused`)                                            |
+| `providerID`         | Unique identifier in format `proxmox://node/vmid`                                                 |
+| `machineID`          | Proxmox VM ID                                                                                     |
+| `provider`           | Always `proxmox` for this operator                                                                |
+| `hostname`           | VM name from Proxmox                                                                              |
+| `region` / `zone`    | Proxmox node name where VM is running                                                             |
+| `cpus`               | Number of CPU cores assigned                                                                      |
+| `memory`             | Memory in bytes                                                                                   |
+| `creationTime`       | When the VM was created                                                                           |
+| `lastUpdated`        | Last status sync timestamp                                                                        |
+| `ipAddresses`        | All IPv4 addresses (requires QEMU Guest Agent)                                                    |
+| `ipv6Addresses`      | All IPv6 addresses (requires QEMU Guest Agent)                                                    |
+| `privateIPAddresses` | RFC 1918 private IPv4 addresses                                                                   |
+| `publicIPAddresses`  | Public IPv4 addresses                                                                             |
+| `networkInterfaces`  | Detailed per-interface network info                                                               |
 
 > **Note**: Network information (IP addresses, interfaces) requires the QEMU Guest Agent to be installed and running inside the VM. Enable it with `PROXMOX_ENABLE_QEMU_AGENT=true`.
 

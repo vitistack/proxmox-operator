@@ -18,7 +18,7 @@ func Init() {
 	viper.SetDefault(consts.DEVELOPMENT, false)
 	viper.SetDefault(consts.LOG_JSON, true)
 	viper.SetDefault(consts.LOG_LEVEL, "info")
-	viper.SetDefault(consts.IP_SOURCE, "")
+	viper.SetDefault(consts.IP_SOURCE, "proxmox")
 	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "proxmox-provider")
 
 	// Proxmox settings (no defaults - must be configured)
@@ -28,11 +28,15 @@ func Init() {
 	viper.SetDefault(consts.PROXMOX_NODE_SELECTION, "first")               // first, random, round-robin
 	viper.SetDefault(consts.PROXMOX_DEFAULT_STORAGE, "local-lvm")          // default storage pool
 	viper.SetDefault(consts.PROXMOX_DEFAULT_NETWORK, "vmbr0")              // default network bridge
+	viper.SetDefault(consts.PROXMOX_NETWORK_MODEL, "virtio")               // network model (virtio = paravirtualized)
 	viper.SetDefault(consts.PROXMOX_DEFAULT_CPU_TYPE, "x86-64-v2-AES")     // default CPU type
 	viper.SetDefault(consts.PROXMOX_ENABLE_NUMA, true)                     // NUMA disabled by default
 	viper.SetDefault(consts.PROXMOX_SCSI_CONTROLLER, "virtio-scsi-single") // SCSI controller type
 	viper.SetDefault(consts.PROXMOX_ENABLE_QEMU_AGENT, true)               // QEMU Guest Agent enabled by default
 	viper.SetDefault(consts.PROXMOX_START_ON_CREATE, true)                 // Start VM after creation
+	viper.SetDefault(consts.PROXMOX_DEFAULT_VLAN, 0)                       // Default VLAN tag (0 = no VLAN, fallback if NetworkNamespace not found)
+	viper.SetDefault(consts.PROXMOX_DEFAULT_MTU, 0)                        // Default MTU (0 = use Proxmox default 1500)
+	viper.SetDefault(consts.MAC_SET, "24")                                 // Second octet for MAC address generation
 
 	dotenv.LoadDotEnv()
 
@@ -58,6 +62,7 @@ func printEnvironmentSettings() {
 		consts.PROXMOX_NODE_SELECTION,
 		consts.PROXMOX_DEFAULT_STORAGE,
 		consts.PROXMOX_DEFAULT_NETWORK,
+		consts.PROXMOX_NETWORK_MODEL,
 		consts.PROXMOX_DEFAULT_CPU_TYPE,
 		consts.PROXMOX_ENABLE_NUMA,
 		consts.PROXMOX_SCSI_CONTROLLER,

@@ -118,6 +118,16 @@ spec:
               value: {{ .Values.config.vm.defaultStorage | quote }}
             - name: PROXMOX_DEFAULT_NETWORK
               value: {{ .Values.config.vm.defaultNetwork | quote }}
+            - name: PROXMOX_NETWORK_MODEL
+              value: {{ .Values.config.vm.networkModel | quote }}
+            {{- if .Values.config.vm.defaultVlan }}
+            - name: PROXMOX_DEFAULT_VLAN
+              value: {{ .Values.config.vm.defaultVlan | quote }}
+            {{- end }}
+            {{- if .Values.config.vm.defaultMtu }}
+            - name: PROXMOX_DEFAULT_MTU
+              value: {{ .Values.config.vm.defaultMtu | quote }}
+            {{- end }}
             - name: PROXMOX_DEFAULT_CPU_TYPE
               value: {{ .Values.config.vm.defaultCpuType | quote }}
             - name: PROXMOX_ENABLE_NUMA
@@ -128,6 +138,11 @@ spec:
               value: {{ .Values.config.vm.enableQemuAgent | quote }}
             - name: PROXMOX_START_ON_CREATE
               value: {{ .Values.config.vm.startOnCreate | quote }}
+            # Network configuration settings
+            - name: IP_SOURCE
+              value: {{ .Values.config.network.ipSource | quote }}
+            - name: MAC_SET
+              value: {{ .Values.config.network.macSet | quote }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

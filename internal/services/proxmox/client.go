@@ -120,12 +120,23 @@ func NewProxmoxClient(opts ...ClientOption) (ProxmoxClient, error) {
 }
 
 // NewProxmoxClientFromConfig creates a new Proxmox client from config values
-func NewProxmoxClientFromConfig(endpoint, username, password string, insecure bool) (ProxmoxClient, error) {
-	return NewProxmoxClient(
+// It supports both token-based and username/password authentication
+// Token authentication is preferred if both tokenID and tokenSecret are provided
+func NewProxmoxClientFromConfig(endpoint, username, password, tokenID, tokenSecret string, insecure bool) (ProxmoxClient, error) {
+	opts := []ClientOption{
 		WithEndpoint(endpoint),
-		WithCredentials(username, password),
 		WithInsecureTLS(insecure),
-	)
+	}
+
+	// Prefer token authentication if provided
+	if tokenID != "" && tokenSecret != "" {
+		opts = append(opts, WithToken(tokenID, tokenSecret))
+	} else if username != "" && password != "" {
+		opts = append(opts, WithCredentials(username, password))
+	}
+	// If neither is provided, NewProxmoxClient will return an error
+
+	return NewProxmoxClient(opts...)
 }
 
 // NewProxmoxClientFromProvider creates a Proxmox client from MachineProvider spec

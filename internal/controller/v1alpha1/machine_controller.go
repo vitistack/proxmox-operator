@@ -20,61 +20,80 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/luthermonson/go-proxmox"
 	"github.com/spf13/viper"
 	vitistackcrdsv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/proxmox-operator/internal/consts"
+	"github.com/vitistack/proxmox-operator/internal/helpers/network"
+	"github.com/vitistack/proxmox-operator/internal/services/networkconfiguration"
+	"github.com/vitistack/proxmox-operator/internal/services/nodeselection"
+	proxmoxsvc "github.com/vitistack/proxmox-operator/internal/services/proxmox"
+	"github.com/vitistack/proxmox-operator/internal/services/vmbuilder"
+	"github.com/vitistack/proxmox-operator/pkg/macaddress"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/luthermonson/go-proxmox"
-	"github.com/vitistack/proxmox-operator/internal/consts"
-	proxmoxsvc "github.com/vitistack/proxmox-operator/internal/services/proxmox"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 const (
 	// machineFinalizer is the finalizer added to Machine resources
 	machineFinalizer = "vitistack.io/proxmox-machine"
 
+	// updateInterval is the interval for periodic status updates
 	updateInterval = 10 * time.Second
+
+	// Proxmox VM status constants (lowercase as returned by Proxmox API)
+	proxmoxStatusRunning   = "running"
+	proxmoxStatusStopped   = "stopped"
+	proxmoxStatusPaused    = "paused"
+	proxmoxStatusSuspended = "suspended"
+	proxmoxStatusPrelaunch = "prelaunch"
 )
 
 // MachineReconciler reconciles a Machine object
 type MachineReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	ProxmoxClient proxmoxsvc.ProxmoxClient
+	Scheme              *runtime.Scheme
+	ProxmoxClient       proxmoxsvc.ProxmoxClient
+	MacAddressGenerator macaddress.MacAddressGenerator
+
+	// Internal services (initialized lazily)
+	vmBuilder      *vmbuilder.Builder
+	nodeSelector   *nodeselection.Selector
+	netConfManager *networkconfiguration.Manager
 }
 
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations/status,verbs=get;watch
+// +kubebuilder:rbac:groups=vitistack.io,resources=networknamespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=vitistack.io,resources=networknamespaces/status,verbs=get
+// +kubebuilder:rbac:groups=vitistack.io,resources=vitistacks,verbs=get;list;watch
+// +kubebuilder:rbac:groups=vitistack.io,resources=machineproviders,verbs=get;list;watch;create;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Machine object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
+
+	// Initialize services if not already done
+	r.initServices()
 
 	// Fetch the Machine instance
 	var machine vitistackcrdsv1alpha1.Machine
 	if err := r.Get(ctx, req.NamespacedName, &machine); err != nil {
-		// Ignore not-found errors (object deleted) and requeue nothing
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -84,46 +103,19 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// Handle deletion - check if object is being deleted
+	// Handle deletion
 	if !machine.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&machine, machineFinalizer) {
-			// Update phase to terminating
-			if machine.Status.Phase != vitistackcrdsv1alpha1.MachinePhaseTerminating && machine.Status.Phase != vitistackcrdsv1alpha1.MachinePhaseTerminated {
-				machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseTerminating
-				if err := r.Status().Update(ctx, &machine); err != nil {
-					return ctrl.Result{}, err
-				}
-			}
-
-			// Run termination logic to delete the VM from Proxmox
-			result, err := r.reconcileTerminating(ctx, &machine)
-			if err != nil {
-				return result, err
-			}
-
-			// Remove finalizer after successful deletion
-			logger.Info("Removing finalizer from Machine", "finalizer", machineFinalizer)
-			controllerutil.RemoveFinalizer(&machine, machineFinalizer)
-			if err := r.Update(ctx, &machine); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
+		return r.handleDeletion(ctx, &machine)
 	}
 
-	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(&machine, machineFinalizer) {
-		logger.Info("Adding finalizer to Machine", "finalizer", machineFinalizer)
-		controllerutil.AddFinalizer(&machine, machineFinalizer)
-		if err := r.Update(ctx, &machine); err != nil {
-			return ctrl.Result{}, err
-		}
+	// Ensure finalizer is present
+	if err := r.ensureFinalizer(ctx, &machine); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Fetch MachineClass
-	var machineClass vitistackcrdsv1alpha1.MachineClass
-	machineClassKey := client.ObjectKey{Name: machine.Spec.MachineClass}
-	if err := r.Get(ctx, machineClassKey, &machineClass); err != nil {
+	machineClass, err := r.getMachineClass(ctx, machine.Spec.MachineClass)
+	if err != nil {
 		logger.Error(err, "Failed to get MachineClass", "machineClass", machine.Spec.MachineClass)
 		return ctrl.Result{}, err
 	}
@@ -134,34 +126,92 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// Check if MachineClass supports Proxmox
-	// supportsProxmox := false
-	// for _, provider := range machineClass.Spec.MachineProviders {
-	// 	if provider == vitistackcrdsv1alpha1.MachineProviderTypeProxmox {
-	// 		supportsProxmox = true
-	// 		break
-	// 	}
-	// }
-	// if !supportsProxmox {
-	// 	logger.Info("MachineClass does not support Proxmox", "machineClass", machine.Spec.MachineClass)
-	// 	return ctrl.Result{}, nil
-	// }
-
 	// Reconcile based on current phase
+	return r.reconcileByPhase(ctx, &machine, machineClass)
+}
+
+// initServices initializes the internal services
+func (r *MachineReconciler) initServices() {
+	if r.vmBuilder == nil {
+		r.vmBuilder = vmbuilder.NewBuilder()
+	}
+	if r.nodeSelector == nil {
+		r.nodeSelector = nodeselection.NewSelector()
+	}
+	if r.netConfManager == nil {
+		r.netConfManager = networkconfiguration.NewManager(r.Client)
+	}
+}
+
+// handleDeletion handles the deletion of a machine
+func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	if !controllerutil.ContainsFinalizer(machine, machineFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	// Update phase to terminating
+	if machine.Status.Phase != vitistackcrdsv1alpha1.MachinePhaseTerminating &&
+		machine.Status.Phase != vitistackcrdsv1alpha1.MachinePhaseTerminated {
+		machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseTerminating
+		if err := r.Status().Update(ctx, machine); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Run termination logic
+	result, err := r.reconcileTerminating(ctx, machine)
+	if err != nil {
+		return result, err
+	}
+
+	// Remove finalizer
+	logger.Info("Removing finalizer from Machine", "finalizer", machineFinalizer)
+	controllerutil.RemoveFinalizer(machine, machineFinalizer)
+	if err := r.Update(ctx, machine); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// ensureFinalizer ensures the finalizer is present on the machine
+func (r *MachineReconciler) ensureFinalizer(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) error {
+	logger := logf.FromContext(ctx)
+
+	if controllerutil.ContainsFinalizer(machine, machineFinalizer) {
+		return nil
+	}
+
+	logger.Info("Adding finalizer to Machine", "finalizer", machineFinalizer)
+	controllerutil.AddFinalizer(machine, machineFinalizer)
+	return r.Update(ctx, machine)
+}
+
+// getMachineClass fetches the MachineClass for the machine
+func (r *MachineReconciler) getMachineClass(ctx context.Context, name string) (*vitistackcrdsv1alpha1.MachineClass, error) {
+	var machineClass vitistackcrdsv1alpha1.MachineClass
+	if err := r.Get(ctx, client.ObjectKey{Name: name}, &machineClass); err != nil {
+		return nil, err
+	}
+	return &machineClass, nil
+}
+
+// reconcileByPhase dispatches reconciliation based on machine phase
+func (r *MachineReconciler) reconcileByPhase(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, machineClass *vitistackcrdsv1alpha1.MachineClass) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
 	switch machine.Status.Phase {
-	case "":
-		// Initial creation
-		return r.reconcileCreate(ctx, &machine, &machineClass)
-	case vitistackcrdsv1alpha1.MachinePhasePending:
-		return r.reconcileCreate(ctx, &machine, &machineClass)
+	case "", vitistackcrdsv1alpha1.MachinePhasePending:
+		return r.reconcileCreate(ctx, machine, machineClass)
 	case vitistackcrdsv1alpha1.MachinePhaseCreating:
-		return r.reconcileCreating(ctx, &machine)
+		return r.reconcileCreating(ctx, machine)
 	case vitistackcrdsv1alpha1.MachinePhaseRunning:
-		return r.reconcileRunning(ctx, &machine)
+		return r.reconcileRunning(ctx, machine)
 	case vitistackcrdsv1alpha1.MachinePhaseTerminating:
-		return r.reconcileTerminating(ctx, &machine)
+		return r.reconcileTerminating(ctx, machine)
 	case vitistackcrdsv1alpha1.MachinePhaseFailed:
-		// Don't retry failed machines automatically - user must delete and recreate
 		logger.Info("Machine in Failed state, not retrying", "phase", machine.Status.Phase)
 		return ctrl.Result{}, nil
 	default:
@@ -170,375 +220,212 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 }
 
-// reconcileCreate handles the creation of a new VM
-func (r *MachineReconciler) reconcileCreate(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, machineClass *vitistackcrdsv1alpha1.MachineClass) (ctrl.Result, error) {
+// SetupWithManager sets up the controller with the Manager.
+func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Create predicate to filter only Proxmox machines
+	proxmoxMachinePredicate := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			if machine, ok := e.Object.(*vitistackcrdsv1alpha1.Machine); ok {
+				return machine.Spec.Provider == vitistackcrdsv1alpha1.MachineProviderTypeProxmox
+			}
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if machine, ok := e.ObjectNew.(*vitistackcrdsv1alpha1.Machine); ok {
+				return machine.Spec.Provider == vitistackcrdsv1alpha1.MachineProviderTypeProxmox
+			}
+			return false
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			if machine, ok := e.Object.(*vitistackcrdsv1alpha1.Machine); ok {
+				return machine.Spec.Provider == vitistackcrdsv1alpha1.MachineProviderTypeProxmox
+			}
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			if machine, ok := e.Object.(*vitistackcrdsv1alpha1.Machine); ok {
+				return machine.Spec.Provider == vitistackcrdsv1alpha1.MachineProviderTypeProxmox
+			}
+			return false
+		},
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&vitistackcrdsv1alpha1.Machine{}).
+		WithEventFilter(proxmoxMachinePredicate).
+		Watches(&vitistackcrdsv1alpha1.MachineClass{}, &handler.EnqueueRequestForObject{}).
+		Owns(&vitistackcrdsv1alpha1.NetworkConfiguration{}).
+		Named("proxmox-machine").
+		Complete(r)
+}
+
+// updateStatusWithRetry updates the machine status with automatic retry on conflict
+func (r *MachineReconciler) updateStatusWithRetry(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) error {
 	logger := logf.FromContext(ctx)
 
-	// Check if VM already exists (from previous reconciliation attempt)
-	if machine.Status.MachineID != "" {
-		vmID, err := strconv.Atoi(machine.Status.MachineID)
-		if err == nil {
-			// Extract node from ProviderID if available
-			node, _, parseErr := parseProviderID(machine.Status.ProviderID)
-			if parseErr == nil && node != "" {
-				// Check if VM exists
-				vm, err := r.ProxmoxClient.GetVM(ctx, node, vmID)
-				if err == nil && vm != nil {
-					logger.Info("VM already exists, updating status to Running", "vmID", vmID, "node", node)
-					machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseRunning
-					r.updateVMStatus(ctx, machine, vm, node)
-					r.setCondition(ctx, machine, "True", "VMRunning", "VM already exists and is running")
-					if err := r.updateStatusWithRetry(ctx, machine); err != nil {
-						return ctrl.Result{}, err
-					}
-					return ctrl.Result{}, nil
+	err := r.Status().Update(ctx, machine)
+	if err != nil {
+		if apierrors.IsConflict(err) {
+			logger.V(1).Info("Conflict updating status, will be retried on next reconcile")
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// setCondition sets a Ready condition on the Machine status
+func (r *MachineReconciler) setCondition(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, status string, reason, message string) {
+	logger := logf.FromContext(ctx)
+
+	now := metav1.Now()
+
+	var existingCondition *vitistackcrdsv1alpha1.MachineCondition
+	for i := range machine.Status.Conditions {
+		if machine.Status.Conditions[i].Type == "Ready" {
+			existingCondition = &machine.Status.Conditions[i]
+			break
+		}
+	}
+
+	if existingCondition != nil {
+		existingCondition.Status = status
+		existingCondition.LastTransitionTime = now
+		existingCondition.Reason = reason
+		existingCondition.Message = message
+	} else {
+		condition := vitistackcrdsv1alpha1.MachineCondition{
+			Type:               "Ready",
+			Status:             status,
+			LastTransitionTime: now,
+			Reason:             reason,
+			Message:            message,
+		}
+		machine.Status.Conditions = append(machine.Status.Conditions, condition)
+	}
+
+	logger.Info("Set machine condition", "type", "Ready", "status", status, "reason", reason)
+}
+
+// updateVMStatus updates machine status fields from Proxmox VM data
+func (r *MachineReconciler) updateVMStatus(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, vm *proxmox.VirtualMachine, node string) {
+	logger := logf.FromContext(ctx)
+
+	if vm == nil {
+		return
+	}
+
+	machine.Status.LastUpdated = metav1.Now()
+	machine.Status.State = mapProxmoxStatusToState(vm.Status)
+
+	if vm.Name != "" {
+		machine.Status.Hostname = vm.Name
+	}
+
+	if vm.CPUs > 0 {
+		machine.Status.CPUs = vm.CPUs
+	}
+
+	if vm.MaxMem > 0 {
+		if vm.MaxMem <= math.MaxInt64 {
+			machine.Status.Memory = int64(vm.MaxMem)
+		} else {
+			machine.Status.Memory = math.MaxInt64
+		}
+	}
+
+	machine.Status.Provider = vitistackcrdsv1alpha1.MachineProviderTypeProxmox
+	if machine.Status.Region == "" {
+		machine.Status.Region = node
+	}
+	if machine.Status.Zone == "" {
+		machine.Status.Zone = node
+	}
+
+	if vm.Agent && vm.Status == proxmoxStatusRunning {
+		r.updateNetworkStatus(ctx, machine, vm)
+	}
+
+	logger.V(1).Info("Updated VM status", "state", vm.Status, "cpus", vm.CPUs, "memory", vm.MaxMem, "hostname", vm.Name)
+}
+
+// updateNetworkStatus fetches network interface information from QEMU guest agent
+func (r *MachineReconciler) updateNetworkStatus(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, vm *proxmox.VirtualMachine) {
+	logger := logf.FromContext(ctx)
+
+	ifaces, err := vm.AgentGetNetworkIFaces(ctx)
+	if err != nil {
+		logger.V(1).Info("Failed to get network interfaces from QEMU agent", "error", err.Error())
+		return
+	}
+
+	machine.Status.NetworkInterfaces = nil
+	machine.Status.IPAddresses = nil
+	machine.Status.IPv6Addresses = nil
+	machine.Status.PrivateIPAddresses = nil
+	machine.Status.PublicIPAddresses = nil
+
+	var allIPv4, allIPv6 []string
+
+	for _, iface := range ifaces {
+		if iface.Name == "lo" {
+			continue
+		}
+
+		netIfaceStatus := vitistackcrdsv1alpha1.NetworkInterfaceStatus{
+			Name:       iface.Name,
+			MACAddress: iface.HardwareAddress,
+			Type:       "ethernet",
+		}
+
+		var ipv4Addrs, ipv6Addrs []string
+
+		for _, ipAddr := range iface.IPAddresses {
+			switch ipAddr.IPAddressType {
+			case "ipv4":
+				ipv4Addrs = append(ipv4Addrs, ipAddr.IPAddress)
+				allIPv4 = append(allIPv4, ipAddr.IPAddress)
+			case "ipv6":
+				if !strings.HasPrefix(ipAddr.IPAddress, "fe80:") {
+					ipv6Addrs = append(ipv6Addrs, ipAddr.IPAddress)
+					allIPv6 = append(allIPv6, ipAddr.IPAddress)
 				}
 			}
 		}
+
+		netIfaceStatus.IPAddresses = ipv4Addrs
+		netIfaceStatus.IPv6Addresses = ipv6Addrs
+
+		if len(ipv4Addrs) > 0 || len(ipv6Addrs) > 0 {
+			netIfaceStatus.State = "up"
+		}
+
+		machine.Status.NetworkInterfaces = append(machine.Status.NetworkInterfaces, netIfaceStatus)
 	}
 
-	// Update status to creating
-	machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseCreating
-	r.setCondition(ctx, machine, "False", "Creating", "VM creation in progress")
-	if err := r.updateStatusWithRetry(ctx, machine); err != nil {
-		return ctrl.Result{}, err
-	}
+	machine.Status.IPAddresses = allIPv4
+	machine.Status.IPv6Addresses = allIPv6
 
-	// Get Proxmox node names and select one based on strategy
-	nodeNames, err := r.ProxmoxClient.GetNodeNames(ctx)
-	if err != nil {
-		logger.Error(err, "Failed to get Proxmox nodes")
-		machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseFailed
-		r.setCondition(ctx, machine, "False", "NodeSelectionFailed", fmt.Sprintf("Failed to get Proxmox nodes: %v", err))
-		_ = r.updateStatusWithRetry(ctx, machine)
-		return ctrl.Result{}, err
-	}
-	node, err := r.selectNode(ctx, nodeNames)
-	if err != nil {
-		logger.Error(err, "Failed to select Proxmox node")
-		machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseFailed
-		r.setCondition(ctx, machine, "False", "NodeSelectionFailed", fmt.Sprintf("Failed to select Proxmox node: %v", err))
-		_ = r.updateStatusWithRetry(ctx, machine)
-		return ctrl.Result{}, err
-	}
-
-	// Generate VM ID starting from configured base
-	vmIDStart := viper.GetInt(consts.PROXMOX_VM_ID_START)
-	uidStr := string(machine.UID)
-	uidInt := 0
-	for _, r := range uidStr {
-		uidInt += int(r)
-	}
-	vmID := vmIDStart + uidInt%1000 // Use configured start + hash-like offset
-
-	// Build VM options from MachineClass
-	options := r.buildVMOptions(machine, machineClass)
-
-	// Validate ISO exists (if specified)
-	if machine.Spec.OS.ImageID != "" {
-		if err := r.validateISO(ctx, node, machine.Spec.OS.ImageID); err != nil {
-			logger.Error(err, "ISO validation failed")
-			machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseFailed
-			machine.Status.Message = fmt.Sprintf("ISO validation failed: %v", err)
-			r.setCondition(ctx, machine, "False", "ISOValidationFailed", fmt.Sprintf("ISO validation failed: %v", err))
-			_ = r.updateStatusWithRetry(ctx, machine)
-			return ctrl.Result{}, err
+	for _, ip := range allIPv4 {
+		if network.IsPrivateIP(ip) {
+			machine.Status.PrivateIPAddresses = append(machine.Status.PrivateIPAddresses, ip)
+		} else {
+			machine.Status.PublicIPAddresses = append(machine.Status.PublicIPAddresses, ip)
 		}
 	}
 
-	// Create VM
-	task, err := r.ProxmoxClient.CreateVM(ctx, node, vmID, options)
-	if err != nil {
-		logger.Error(err, "Failed to create VM")
-		machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseFailed
-		machine.Status.Message = err.Error()
-		r.setCondition(ctx, machine, "False", "VMCreationFailed", fmt.Sprintf("Failed to create VM: %v", err))
-		_ = r.updateStatusWithRetry(ctx, machine)
-		return ctrl.Result{}, err
-	}
-
-	// Wait for task completion (poll every 5 seconds, timeout after 5 minutes)
-	if err := task.Wait(ctx, 5*time.Second, 5*time.Minute); err != nil {
-		logger.Error(err, "VM creation task failed")
-		machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseFailed
-		machine.Status.Message = err.Error()
-		r.setCondition(ctx, machine, "False", "VMProvisioningFailed", fmt.Sprintf("VM creation task failed: %v", err))
-		_ = r.updateStatusWithRetry(ctx, machine)
-		return ctrl.Result{}, err
-	}
-
-	// Fetch VM details to populate status
-	vm, err := r.ProxmoxClient.GetVM(ctx, node, vmID)
-	if err != nil {
-		logger.Error(err, "Failed to get VM details after creation", "vmID", vmID)
-		// Continue anyway - VM was created successfully
-	}
-
-	// Update status
-	machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseRunning
-	machine.Status.ProviderID = fmt.Sprintf("proxmox://%s/%d", node, vmID)
-	machine.Status.MachineID = fmt.Sprintf("%d", vmID)
-	machine.Status.Provider = "proxmox"
-	machine.Status.Region = node
-	machine.Status.Zone = node
-	machine.Status.CreationTime = &metav1.Time{Time: time.Now()}
-	r.updateVMStatus(ctx, machine, vm, node)
-	r.setCondition(ctx, machine, "True", "VMRunning", "VM successfully created and running")
-	if err := r.updateStatusWithRetry(ctx, machine); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	logger.Info("VM created successfully", "vmID", vmID, "node", node)
-	return ctrl.Result{}, nil
-}
-
-// reconcileCreating checks if VM creation is complete
-func (r *MachineReconciler) reconcileCreating(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) (ctrl.Result, error) {
-	// For now, assume creation is synchronous
-	return ctrl.Result{}, nil
-}
-
-// reconcileRunning ensures the VM is running and updates status
-func (r *MachineReconciler) reconcileRunning(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
-
-	// Parse provider ID to get node and VM ID
-	node, vmID, err := parseProviderID(machine.Status.ProviderID)
-	if err != nil {
-		logger.Error(err, "Failed to parse ProviderID")
-		return ctrl.Result{}, nil // Don't requeue on parse error
-	}
-
-	// Get current VM state from Proxmox
-	vm, err := r.ProxmoxClient.GetVM(ctx, node, vmID)
-	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "not found") {
-			// VM was deleted externally
-			logger.Info("VM no longer exists in Proxmox", "vmID", vmID, "node", node)
-			machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseFailed
-			machine.Status.State = "missing"
-			failureReason := "VMDeleted"
-			failureMessage := "VM was deleted from Proxmox externally"
-			machine.Status.FailureReason = &failureReason
-			machine.Status.FailureMessage = &failureMessage
-			r.setCondition(ctx, machine, "False", "VMDeleted", "VM was deleted from Proxmox externally")
-			if updateErr := r.updateStatusWithRetry(ctx, machine); updateErr != nil {
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, nil
-		}
-		logger.Error(err, "Failed to get VM status")
-		return ctrl.Result{RequeueAfter: updateInterval}, nil
-	}
-
-	// Update VM status from Proxmox data
-	r.updateVMStatus(ctx, machine, vm, node)
-
-	if err := r.updateStatusWithRetry(ctx, machine); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Requeue to periodically sync status
-	return ctrl.Result{RequeueAfter: updateInterval}, nil
-}
-
-// reconcileTerminating handles VM deletion
-func (r *MachineReconciler) reconcileTerminating(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
-
-	// Set terminating condition
-	r.setCondition(ctx, machine, "False", "Terminating", "VM deletion in progress")
-
-	// If no ProviderID, the VM was never created - just remove finalizer
-	if machine.Status.ProviderID == "" {
-		logger.Info("No ProviderID set, VM was never created - removing finalizer")
-		return ctrl.Result{}, nil
-	}
-
-	// Parse VM ID from ProviderID
-	node, vmID, err := parseProviderID(machine.Status.ProviderID)
-	if err != nil {
-		logger.Error(err, "Failed to parse ProviderID")
-		r.setCondition(ctx, machine, "False", "DeletionFailed", err.Error())
-		return ctrl.Result{}, err
-	}
-
-	// Check if VM exists and stop it if running
-	vm, err := r.ProxmoxClient.GetVM(ctx, node, vmID)
-	if err != nil {
-		// VM doesn't exist, nothing to delete
-		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "not found") {
-			logger.Info("VM does not exist, nothing to delete", "vmID", vmID, "node", node)
-			machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseTerminated
-			r.setCondition(ctx, machine, "False", "Terminated", "VM already deleted or never existed")
-			if updateErr := r.updateStatusWithRetry(ctx, machine); updateErr != nil {
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, nil
-		}
-		logger.Error(err, "Failed to get VM status")
-		r.setCondition(ctx, machine, "False", "DeletionFailed", fmt.Sprintf("Failed to get VM: %v", err))
-		return ctrl.Result{}, err
-	}
-
-	// Stop VM if it's running
-	if vm.Status == "running" {
-		logger.Info("Stopping VM before deletion", "vmID", vmID, "node", node)
-		r.setCondition(ctx, machine, "False", "Stopping", "Stopping VM before deletion")
-		_ = r.updateStatusWithRetry(ctx, machine)
-
-		stopTask, err := r.ProxmoxClient.StopVM(ctx, node, vmID)
-		if err != nil {
-			logger.Error(err, "Failed to stop VM")
-			r.setCondition(ctx, machine, "False", "DeletionFailed", fmt.Sprintf("Failed to stop VM: %v", err))
-			return ctrl.Result{}, err
-		}
-
-		// Wait for stop task completion
-		if err := stopTask.Wait(ctx, 5*time.Second, 2*time.Minute); err != nil {
-			logger.Error(err, "VM stop task failed")
-			r.setCondition(ctx, machine, "False", "DeletionFailed", fmt.Sprintf("VM stop task failed: %v", err))
-			return ctrl.Result{}, err
-		}
-		logger.Info("VM stopped successfully", "vmID", vmID, "node", node)
-	}
-
-	// Delete VM
-	logger.Info("Deleting VM", "vmID", vmID, "node", node)
-	task, err := r.ProxmoxClient.DeleteVM(ctx, node, vmID)
-	if err != nil {
-		logger.Error(err, "Failed to delete VM")
-		r.setCondition(ctx, machine, "False", "DeletionFailed", fmt.Sprintf("Failed to delete VM: %v", err))
-		return ctrl.Result{}, err
-	}
-
-	// Wait for task completion (poll every 5 seconds, timeout after 5 minutes)
-	if err := task.Wait(ctx, 5*time.Second, 5*time.Minute); err != nil {
-		logger.Error(err, "VM deletion task failed")
-		r.setCondition(ctx, machine, "False", "DeletionFailed", fmt.Sprintf("VM deletion task failed: %v", err))
-		return ctrl.Result{}, err
-	}
-
-	// Update status
-	machine.Status.Phase = vitistackcrdsv1alpha1.MachinePhaseTerminated
-	r.setCondition(ctx, machine, "False", "Terminated", "VM successfully deleted")
-	if err := r.updateStatusWithRetry(ctx, machine); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	logger.Info("VM deleted successfully", "vmID", vmID, "node", node)
-	return ctrl.Result{}, nil
-}
-
-// parseProviderID parses a ProviderID in format "proxmox://node/vmID" and returns node and vmID
-func parseProviderID(providerID string) (node string, vmID int, err error) {
-	if providerID == "" {
-		return "", 0, fmt.Errorf("empty ProviderID")
-	}
-	// Format: proxmox://node/vmID -> splits to ["proxmox:", "", "node", "vmID"]
-	parts := strings.Split(providerID, "/")
-	if len(parts) != 4 || parts[0] != "proxmox:" {
-		return "", 0, fmt.Errorf("invalid ProviderID format: %s (expected proxmox://node/vmID)", providerID)
-	}
-	node = parts[2]
-	vmID, err = strconv.Atoi(parts[3])
-	if err != nil {
-		return "", 0, fmt.Errorf("invalid VM ID in ProviderID: %s", parts[3])
-	}
-	return node, vmID, nil
-}
-
-// buildVMOptions builds Proxmox VM options from Machine and MachineClass specs
-func (r *MachineReconciler) buildVMOptions(machine *vitistackcrdsv1alpha1.Machine, machineClass *vitistackcrdsv1alpha1.MachineClass) []proxmox.VirtualMachineOption {
-	options := []proxmox.VirtualMachineOption{}
-
-	// CPU cores
-	if machine.Spec.CPU.Cores > 0 {
-		options = append(options, proxmox.VirtualMachineOption{Name: "cores", Value: machine.Spec.CPU.Cores})
-	} else if machineClass.Spec.CPU.Cores > 0 {
-		options = append(options, proxmox.VirtualMachineOption{Name: "cores", Value: machineClass.Spec.CPU.Cores})
-	}
-
-	// CPU type
-	cpuType := viper.GetString(consts.PROXMOX_DEFAULT_CPU_TYPE)
-	if cpuType != "" {
-		options = append(options, proxmox.VirtualMachineOption{Name: "cpu", Value: cpuType})
-	}
-
-	// NUMA
-	if viper.GetBool(consts.PROXMOX_ENABLE_NUMA) {
-		options = append(options, proxmox.VirtualMachineOption{Name: "numa", Value: 1})
-	}
-
-	// Memory
-	memoryMB := int64(0)
-	if machine.Spec.Memory > 0 {
-		memoryMB = machine.Spec.Memory / (1024 * 1024) // Convert bytes to MB
-	} else if machineClass.Spec.Memory.Quantity.Value() > 0 {
-		memoryMB = machineClass.Spec.Memory.Quantity.Value() / (1024 * 1024)
-	}
-	if memoryMB > 0 {
-		options = append(options, proxmox.VirtualMachineOption{Name: "memory", Value: memoryMB})
-	}
-
-	// SCSI Controller
-	scsiController := viper.GetString(consts.PROXMOX_SCSI_CONTROLLER)
-	if scsiController != "" {
-		options = append(options, proxmox.VirtualMachineOption{Name: "scsihw", Value: scsiController})
-	}
-
-	// Disks
-	for _, disk := range machine.Spec.Disks {
-		if disk.Name == "root" {
-			sizeGB := disk.SizeGB
-			if sizeGB == 0 {
-				sizeGB = 50 // Default
-			}
-			storagePool := viper.GetString(consts.PROXMOX_DEFAULT_STORAGE)
-			options = append(options, proxmox.VirtualMachineOption{Name: "scsi0", Value: fmt.Sprintf("%s:%d", storagePool, sizeGB)})
-		}
-	}
-
-	// Network
-	if len(machine.Spec.Network.Interfaces) > 0 {
-		networkBridge := viper.GetString(consts.PROXMOX_DEFAULT_NETWORK)
-		options = append(options, proxmox.VirtualMachineOption{Name: "net0", Value: fmt.Sprintf("virtio,bridge=%s", networkBridge)})
-	}
-
-	// OS
-	if machine.Spec.OS.ImageID != "" {
-		options = append(options, proxmox.VirtualMachineOption{Name: "cdrom", Value: machine.Spec.OS.ImageID})
-	}
-
-	// Name
-	if machine.Spec.Name != "" {
-		options = append(options, proxmox.VirtualMachineOption{Name: "name", Value: machine.Spec.Name})
-	}
-
-	// QEMU Guest Agent
-	if viper.GetBool(consts.PROXMOX_ENABLE_QEMU_AGENT) {
-		options = append(options, proxmox.VirtualMachineOption{Name: "agent", Value: 1})
-	}
-
-	// Start VM after creation
-	if viper.GetBool(consts.PROXMOX_START_ON_CREATE) {
-		options = append(options, proxmox.VirtualMachineOption{Name: "start", Value: 1})
-	}
-
-	return options
+	logger.V(1).Info("Updated network status", "interfaces", len(machine.Status.NetworkInterfaces), "ipv4", allIPv4, "ipv6", allIPv6)
 }
 
 // validateISO checks if the specified ISO exists in Proxmox storage
 func (r *MachineReconciler) validateISO(ctx context.Context, node string, isoPath string) error {
 	logger := logf.FromContext(ctx)
 
-	// If it's not a local storage path, skip validation (could be HTTP URL)
 	if !strings.HasPrefix(isoPath, "local:") {
 		logger.Info("Skipping ISO validation for non-local path", "isoPath", isoPath)
 		return nil
 	}
 
-	// Parse the storage and volume from the path (e.g., "local:iso/debian.iso")
 	parts := strings.SplitN(isoPath, ":", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid ISO path format: %s", isoPath)
@@ -546,7 +433,6 @@ func (r *MachineReconciler) validateISO(ctx context.Context, node string, isoPat
 
 	storageName := parts[0]
 
-	// Get the storage content to check if the ISO exists
 	nodeClient, err := r.ProxmoxClient.Client().Node(ctx, node)
 	if err != nil {
 		return fmt.Errorf("failed to get node client: %w", err)
@@ -562,16 +448,13 @@ func (r *MachineReconciler) validateISO(ctx context.Context, node string, isoPat
 		return fmt.Errorf("failed to get storage content for %s: %w", storageName, err)
 	}
 
-	// Check if the ISO exists
 	for _, item := range content {
-		// Volid from API includes storage prefix, e.g., "local:iso/debian.iso"
 		if item.Volid == isoPath {
 			logger.Info("ISO validated successfully", "isoPath", isoPath, "node", node)
 			return nil
 		}
 	}
 
-	// Log available ISOs for debugging
 	availableISOs := make([]string, 0, len(content))
 	for _, item := range content {
 		availableISOs = append(availableISOs, item.Volid)
@@ -581,274 +464,89 @@ func (r *MachineReconciler) validateISO(ctx context.Context, node string, isoPat
 	return fmt.Errorf("ISO not found in storage %s: %s (available: %v)", storageName, isoPath, availableISOs)
 }
 
-// setCondition sets a Ready condition on the Machine status
-func (r *MachineReconciler) setCondition(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, status string, reason, message string) {
-	logger := logf.FromContext(ctx)
-
-	now := metav1.Now()
-
-	// Find existing condition or create new one
-	var existingCondition *vitistackcrdsv1alpha1.MachineCondition
-	for i := range machine.Status.Conditions {
-		if machine.Status.Conditions[i].Type == "Ready" {
-			existingCondition = &machine.Status.Conditions[i]
-			break
-		}
+// generateVMID generates a VM ID based on the machine UID
+func (r *MachineReconciler) generateVMID(machine *vitistackcrdsv1alpha1.Machine) int {
+	vmIDStart := viper.GetInt(consts.PROXMOX_VM_ID_START)
+	uidStr := string(machine.UID)
+	uidInt := 0
+	for _, r := range uidStr {
+		uidInt += int(r)
 	}
-
-	if existingCondition != nil {
-		// Update existing condition
-		existingCondition.Status = status
-		existingCondition.LastTransitionTime = now
-		existingCondition.Reason = reason
-		existingCondition.Message = message
-	} else {
-		// Add new condition
-		condition := vitistackcrdsv1alpha1.MachineCondition{
-			Type:               "Ready",
-			Status:             status,
-			LastTransitionTime: now,
-			Reason:             reason,
-			Message:            message,
-		}
-		machine.Status.Conditions = append(machine.Status.Conditions, condition)
-	}
-
-	logger.Info("Set machine condition", "type", "Ready", "status", status, "reason", reason)
+	return vmIDStart + uidInt%1000
 }
 
-// updateStatusWithRetry updates the machine status with automatic retry on conflict
-func (r *MachineReconciler) updateStatusWithRetry(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) error {
+// getVLANTag determines the VLAN tag for a machine
+// Priority: NetworkNamespace in machine's namespace -> Default VLAN env var -> 0 (no VLAN)
+func (r *MachineReconciler) getVLANTag(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) int {
 	logger := logf.FromContext(ctx)
+	defaultVLAN := viper.GetInt(consts.PROXMOX_DEFAULT_VLAN)
 
-	err := r.Status().Update(ctx, machine)
-	if err != nil {
-		if apierrors.IsConflict(err) {
-			logger.V(1).Info("Conflict updating status, will be retried on next reconcile")
-			// Return nil - the controller will requeue anyway and get fresh data
-			return nil
-		}
-		return err
+	// List NetworkNamespaces in the machine's namespace
+	var networkNamespaceList vitistackcrdsv1alpha1.NetworkNamespaceList
+	if err := r.List(ctx, &networkNamespaceList, client.InNamespace(machine.Namespace)); err != nil {
+		logger.Info("Failed to list NetworkNamespaces, using default VLAN",
+			"namespace", machine.Namespace,
+			"defaultVLAN", defaultVLAN,
+			"error", err.Error())
+		return defaultVLAN
 	}
-	return nil
+
+	// Check if any NetworkNamespace exists in the namespace
+	if len(networkNamespaceList.Items) == 0 {
+		logger.Info("No NetworkNamespace found in namespace, using default VLAN",
+			"namespace", machine.Namespace,
+			"defaultVLAN", defaultVLAN)
+		return defaultVLAN
+	}
+
+	// Use the first NetworkNamespace (typically there's one per namespace)
+	networkNamespace := networkNamespaceList.Items[0]
+
+	// Check if VLAN ID is set in the NetworkNamespace status
+	if networkNamespace.Status.VlanID == 0 {
+		logger.Info("NetworkNamespace has no VLAN ID set, using default VLAN",
+			"namespace", machine.Namespace,
+			"networkNamespace", networkNamespace.Name,
+			"defaultVLAN", defaultVLAN)
+		return defaultVLAN
+	}
+
+	logger.V(1).Info("Using VLAN from NetworkNamespace",
+		"namespace", machine.Namespace,
+		"networkNamespace", networkNamespace.Name,
+		"vlanID", networkNamespace.Status.VlanID)
+
+	return networkNamespace.Status.VlanID
 }
 
-// updateVMStatus updates machine status fields from Proxmox VM data
-func (r *MachineReconciler) updateVMStatus(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, vm *proxmox.VirtualMachine, node string) {
-	logger := logf.FromContext(ctx)
+// getMTU determines the MTU for a machine's network interface
+// Priority: Machine spec network interfaces -> Default MTU env var -> 0 (use Proxmox default of 1500)
+func (r *MachineReconciler) getMTU(machine *vitistackcrdsv1alpha1.Machine) int {
+	// TODO: Check if Machine spec has network interfaces with MTU configuration
+	// The Machine CRD doesn't currently have MTU in interfaces, but this allows for future extension
+	_ = machine // Reserved for future use when Machine spec supports MTU
 
-	if vm == nil {
-		return
-	}
-
-	// Update last updated timestamp
-	machine.Status.LastUpdated = metav1.Now()
-
-	// Update state from VM status
-	machine.Status.State = vm.Status
-
-	// Update hostname from VM name
-	if vm.Name != "" {
-		machine.Status.Hostname = vm.Name
-	}
-
-	// Update CPU count
-	if vm.CPUs > 0 {
-		machine.Status.CPUs = vm.CPUs
-	}
-
-	// Update memory (Proxmox returns memory in bytes)
-	// Safe conversion: cap at MaxInt64 to prevent overflow (practically unreachable for real memory)
-	if vm.MaxMem > 0 {
-		if vm.MaxMem <= math.MaxInt64 {
-			machine.Status.Memory = int64(vm.MaxMem)
-		} else {
-			machine.Status.Memory = math.MaxInt64
-		}
-	}
-
-	// Set provider info
-	machine.Status.Provider = vitistackcrdsv1alpha1.MachineProviderTypeProxmox
-	if machine.Status.Region == "" {
-		machine.Status.Region = node
-	}
-	if machine.Status.Zone == "" {
-		machine.Status.Zone = node
-	}
-
-	// Extract network information from QEMU guest agent if available
-	if vm.Agent && vm.Status == "running" {
-		r.updateNetworkStatus(ctx, machine, vm)
-	}
-
-	logger.V(1).Info("Updated VM status", "state", vm.Status, "cpus", vm.CPUs, "memory", vm.MaxMem, "hostname", vm.Name)
+	// Return default MTU from environment if set
+	return viper.GetInt(consts.PROXMOX_DEFAULT_MTU)
 }
 
-// updateNetworkStatus fetches network interface information from QEMU guest agent and updates machine status
-func (r *MachineReconciler) updateNetworkStatus(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, vm *proxmox.VirtualMachine) {
-	logger := logf.FromContext(ctx)
-
-	// Get network interfaces from QEMU guest agent
-	ifaces, err := vm.AgentGetNetworkIFaces(ctx)
-	if err != nil {
-		logger.V(1).Info("Failed to get network interfaces from QEMU agent (agent may not be running)", "error", err.Error())
-		return
-	}
-
-	// Clear existing network status
-	machine.Status.NetworkInterfaces = nil
-	machine.Status.IPAddresses = nil
-	machine.Status.IPv6Addresses = nil
-	machine.Status.PrivateIPAddresses = nil
-	machine.Status.PublicIPAddresses = nil
-
-	var allIPv4 []string
-	var allIPv6 []string
-
-	for _, iface := range ifaces {
-		// Skip loopback interface
-		if iface.Name == "lo" {
-			continue
-		}
-
-		netIfaceStatus := vitistackcrdsv1alpha1.NetworkInterfaceStatus{
-			Name:       iface.Name,
-			MACAddress: iface.HardwareAddress,
-			Type:       "ethernet",
-		}
-
-		var ipv4Addrs []string
-		var ipv6Addrs []string
-
-		for _, ipAddr := range iface.IPAddresses {
-			switch ipAddr.IPAddressType {
-			case "ipv4":
-				ipv4Addrs = append(ipv4Addrs, ipAddr.IPAddress)
-				allIPv4 = append(allIPv4, ipAddr.IPAddress)
-			case "ipv6":
-				// Skip link-local IPv6 addresses
-				if !strings.HasPrefix(ipAddr.IPAddress, "fe80:") {
-					ipv6Addrs = append(ipv6Addrs, ipAddr.IPAddress)
-					allIPv6 = append(allIPv6, ipAddr.IPAddress)
-				}
-			}
-		}
-
-		netIfaceStatus.IPAddresses = ipv4Addrs
-		netIfaceStatus.IPv6Addresses = ipv6Addrs
-
-		// Determine state based on having IP addresses
-		if len(ipv4Addrs) > 0 || len(ipv6Addrs) > 0 {
-			netIfaceStatus.State = "up"
-		}
-
-		machine.Status.NetworkInterfaces = append(machine.Status.NetworkInterfaces, netIfaceStatus)
-	}
-
-	// Set aggregated IP addresses
-	machine.Status.IPAddresses = allIPv4
-	machine.Status.IPv6Addresses = allIPv6
-
-	// Categorize IPs as public or private
-	for _, ip := range allIPv4 {
-		if isPrivateIP(ip) {
-			machine.Status.PrivateIPAddresses = append(machine.Status.PrivateIPAddresses, ip)
-		} else {
-			machine.Status.PublicIPAddresses = append(machine.Status.PublicIPAddresses, ip)
-		}
-	}
-
-	logger.V(1).Info("Updated network status", "interfaces", len(machine.Status.NetworkInterfaces), "ipv4", allIPv4, "ipv6", allIPv6)
-}
-
-// isPrivateIP checks if an IP address is in a private range (RFC 1918)
-func isPrivateIP(ip string) bool {
-	// Check common private IP ranges
-	return strings.HasPrefix(ip, "10.") ||
-		strings.HasPrefix(ip, "172.16.") ||
-		strings.HasPrefix(ip, "172.17.") ||
-		strings.HasPrefix(ip, "172.18.") ||
-		strings.HasPrefix(ip, "172.19.") ||
-		strings.HasPrefix(ip, "172.20.") ||
-		strings.HasPrefix(ip, "172.21.") ||
-		strings.HasPrefix(ip, "172.22.") ||
-		strings.HasPrefix(ip, "172.23.") ||
-		strings.HasPrefix(ip, "172.24.") ||
-		strings.HasPrefix(ip, "172.25.") ||
-		strings.HasPrefix(ip, "172.26.") ||
-		strings.HasPrefix(ip, "172.27.") ||
-		strings.HasPrefix(ip, "172.28.") ||
-		strings.HasPrefix(ip, "172.29.") ||
-		strings.HasPrefix(ip, "172.30.") ||
-		strings.HasPrefix(ip, "172.31.") ||
-		strings.HasPrefix(ip, "192.168.") ||
-		strings.HasPrefix(ip, "127.")
-}
-
-// selectNode selects a Proxmox node based on the configured strategy
-func (r *MachineReconciler) selectNode(ctx context.Context, nodeNames []string) (string, error) {
-	logger := logf.FromContext(ctx)
-
-	if len(nodeNames) == 0 {
-		return "", fmt.Errorf("no Proxmox nodes available")
-	}
-
-	// Get allowed nodes filter
-	allowedNodesStr := viper.GetString(consts.PROXMOX_ALLOWED_NODES)
-	var allowedNodes []string
-	if allowedNodesStr != "" {
-		allowedNodes = strings.Split(allowedNodesStr, ",")
-		for i, node := range allowedNodes {
-			allowedNodes[i] = strings.TrimSpace(node)
-		}
-	}
-
-	// Filter nodes based on allowed list
-	var candidateNodes []string
-	if len(allowedNodes) > 0 {
-		for _, node := range nodeNames {
-			for _, allowed := range allowedNodes {
-				if node == allowed {
-					candidateNodes = append(candidateNodes, node)
-					break
-				}
-			}
-		}
-		if len(candidateNodes) == 0 {
-			return "", fmt.Errorf("no allowed Proxmox nodes available from list: %v", allowedNodes)
-		}
-	} else {
-		candidateNodes = nodeNames
-	}
-
-	// Get selection strategy
-	strategy := viper.GetString(consts.PROXMOX_NODE_SELECTION)
-	if strategy == "" {
-		strategy = "first" // Default
-	}
-
-	logger.Info("Selecting node", "strategy", strategy, "candidates", candidateNodes)
-
-	switch strategy {
-	case "first":
-		return candidateNodes[0], nil
-	case "random":
-		return candidateNodes[rand.Intn(len(candidateNodes))], nil // #nosec G404 - Node selection doesn't require cryptographic randomness
-	case "round-robin":
-		// For now, use random as round-robin would require state persistence
-		// TODO: Implement proper round-robin with stored state
-		return candidateNodes[rand.Intn(len(candidateNodes))], nil // #nosec G404 - Node selection doesn't require cryptographic randomness
+// mapProxmoxStatusToState maps Proxmox VM status to vitistack MachinePhase values
+// Proxmox statuses: running, stopped, paused, suspended, prelaunch
+func mapProxmoxStatusToState(proxmoxStatus string) string {
+	switch strings.ToLower(proxmoxStatus) {
+	case proxmoxStatusRunning:
+		return vitistackcrdsv1alpha1.MachinePhaseRunning
+	case proxmoxStatusStopped:
+		return vitistackcrdsv1alpha1.MachinePhaseStopped
+	case proxmoxStatusPaused, proxmoxStatusSuspended:
+		return vitistackcrdsv1alpha1.MachinePhaseStopping
+	case proxmoxStatusPrelaunch:
+		return vitistackcrdsv1alpha1.MachinePhaseCreating
 	default:
-		logger.Info("Unknown node selection strategy, using 'first'", "strategy", strategy)
-		return candidateNodes[0], nil
+		// For unknown statuses, capitalize the first letter
+		if len(proxmoxStatus) > 0 {
+			return strings.ToUpper(proxmoxStatus[:1]) + strings.ToLower(proxmoxStatus[1:])
+		}
+		return proxmoxStatus
 	}
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&vitistackcrdsv1alpha1.Machine{}).
-		Watches(&vitistackcrdsv1alpha1.MachineClass{}, &handler.EnqueueRequestForObject{}).
-		Named("machine").
-		Complete(r)
 }

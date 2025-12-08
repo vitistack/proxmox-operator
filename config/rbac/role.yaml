@@ -7,7 +7,19 @@ rules:
 - apiGroups:
   - vitistack.io
   resources:
+  - machineproviders
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vitistack.io
+  resources:
   - machines
+  - networkconfigurations
   verbs:
   - create
   - delete
@@ -30,3 +42,25 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - vitistack.io
+  resources:
+  - networkconfigurations/status
+  verbs:
+  - get
+  - watch
+- apiGroups:
+  - vitistack.io
+  resources:
+  - networknamespaces
+  - vitistacks
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vitistack.io
+  resources:
+  - networknamespaces/status
+  verbs:
+  - get
