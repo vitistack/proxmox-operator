@@ -34,4 +34,17 @@ const (
 	PROXMOX_DEFAULT_MTU       = "PROXMOX_DEFAULT_MTU"
 
 	MAC_SET = "MAC_SET"
+
+	// Proxmox disk controller slot names
+	DiskSlotSCSI0   = "scsi0"
+	DiskSlotVirtIO0 = "virtio0"
+	DiskSlotSATA0   = "sata0"
+	DiskSlotIDE0    = "ide0"
+
+	// Proxmox network slot names
+	NetSlot0 = "net0"
+
+	// Default values
+	DefaultDiskSizeGB   = 50
+	DefaultNetworkModel = "virtio"
 )

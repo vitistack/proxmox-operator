@@ -118,19 +118,19 @@ func (b *Builder) buildStorageOptions(machine *vitistackcrdsv1alpha1.Machine) []
 	for i, disk := range machine.Spec.Disks {
 		sizeGB := disk.SizeGB
 		if sizeGB == 0 {
-			sizeGB = 50 // Default size
+			sizeGB = consts.DefaultDiskSizeGB
 		}
 
 		// Determine disk slot name based on disk name or index
 		var diskSlot string
 		if disk.Name == "root" || disk.Boot || i == 0 {
-			diskSlot = "scsi0"
+			diskSlot = consts.DiskSlotSCSI0
 		} else {
 			diskSlot = fmt.Sprintf("scsi%d", i)
 		}
 
 		// Skip if we already created a disk for this slot
-		if diskSlot == "scsi0" && diskCreated {
+		if diskSlot == consts.DiskSlotSCSI0 && diskCreated {
 			continue
 		}
 
@@ -139,17 +139,16 @@ func (b *Builder) buildStorageOptions(machine *vitistackcrdsv1alpha1.Machine) []
 			Value: fmt.Sprintf("%s:%d", storagePool, sizeGB),
 		})
 
-		if diskSlot == "scsi0" {
+		if diskSlot == consts.DiskSlotSCSI0 {
 			diskCreated = true
 		}
 	}
 
 	// If no disks were specified, create a default boot disk
 	if !diskCreated && len(machine.Spec.Disks) == 0 {
-		defaultSizeGB := 50
 		options = append(options, proxmox.VirtualMachineOption{
-			Name:  "scsi0",
-			Value: fmt.Sprintf("%s:%d", storagePool, defaultSizeGB),
+			Name:  consts.DiskSlotSCSI0,
+			Value: fmt.Sprintf("%s:%d", storagePool, consts.DefaultDiskSizeGB),
 		})
 	}
 
@@ -165,7 +164,7 @@ func (b *Builder) buildNetworkOptions(machine *vitistackcrdsv1alpha1.Machine, ne
 		networkModel := viper.GetString(consts.PROXMOX_NETWORK_MODEL)
 
 		if networkModel == "" {
-			networkModel = "virtio" // Default to VirtIO (paravirtualized)
+			networkModel = consts.DefaultNetworkModel
 		}
 
 		// Build network value: model,bridge=<bridge>[,macaddr=<mac>][,tag=<vlan>]
@@ -193,7 +192,7 @@ func (b *Builder) buildNetworkOptions(machine *vitistackcrdsv1alpha1.Machine, ne
 			netValue = fmt.Sprintf("%s,mtu=%d", netValue, mtu)
 		}
 
-		options = append(options, proxmox.VirtualMachineOption{Name: "net0", Value: netValue})
+		options = append(options, proxmox.VirtualMachineOption{Name: consts.NetSlot0, Value: netValue})
 	}
 
 	return options
