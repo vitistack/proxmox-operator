@@ -105,22 +105,52 @@ func (b *Builder) buildMemoryOptions(machine *vitistackcrdsv1alpha1.Machine, mac
 func (b *Builder) buildStorageOptions(machine *vitistackcrdsv1alpha1.Machine) []proxmox.VirtualMachineOption {
 	options := []proxmox.VirtualMachineOption{}
 
-	// SCSI Controller
+	// SCSI Controller - required for SCSI disks
 	scsiController := viper.GetString(consts.PROXMOX_SCSI_CONTROLLER)
 	if scsiController != "" {
 		options = append(options, proxmox.VirtualMachineOption{Name: "scsihw", Value: scsiController})
 	}
 
-	// Disks
-	for _, disk := range machine.Spec.Disks {
-		if disk.Name == "root" {
-			sizeGB := disk.SizeGB
-			if sizeGB == 0 {
-				sizeGB = 50 // Default
-			}
-			storagePool := viper.GetString(consts.PROXMOX_DEFAULT_STORAGE)
-			options = append(options, proxmox.VirtualMachineOption{Name: "scsi0", Value: fmt.Sprintf("%s:%d", storagePool, sizeGB)})
+	storagePool := viper.GetString(consts.PROXMOX_DEFAULT_STORAGE)
+	diskCreated := false
+
+	// Process disks from machine spec
+	for i, disk := range machine.Spec.Disks {
+		sizeGB := disk.SizeGB
+		if sizeGB == 0 {
+			sizeGB = 50 // Default size
 		}
+
+		// Determine disk slot name based on disk name or index
+		var diskSlot string
+		if disk.Name == "root" || disk.Boot || i == 0 {
+			diskSlot = "scsi0"
+		} else {
+			diskSlot = fmt.Sprintf("scsi%d", i)
+		}
+
+		// Skip if we already created a disk for this slot
+		if diskSlot == "scsi0" && diskCreated {
+			continue
+		}
+
+		options = append(options, proxmox.VirtualMachineOption{
+			Name:  diskSlot,
+			Value: fmt.Sprintf("%s:%d", storagePool, sizeGB),
+		})
+
+		if diskSlot == "scsi0" {
+			diskCreated = true
+		}
+	}
+
+	// If no disks were specified, create a default boot disk
+	if !diskCreated && len(machine.Spec.Disks) == 0 {
+		defaultSizeGB := 50
+		options = append(options, proxmox.VirtualMachineOption{
+			Name:  "scsi0",
+			Value: fmt.Sprintf("%s:%d", storagePool, defaultSizeGB),
+		})
 	}
 
 	return options

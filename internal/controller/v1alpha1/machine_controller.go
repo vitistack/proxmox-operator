@@ -166,10 +166,24 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 		return result, err
 	}
 
+	// Re-fetch the machine to get the latest resource version before removing finalizer
+	if err := r.Get(ctx, client.ObjectKeyFromObject(machine), machine); err != nil {
+		// If the machine is already gone, we're done
+		if apierrors.IsNotFound(err) {
+			logger.Info("Machine already deleted, nothing to do")
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
 	// Remove finalizer
 	logger.Info("Removing finalizer from Machine", "finalizer", machineFinalizer)
 	controllerutil.RemoveFinalizer(machine, machineFinalizer)
 	if err := r.Update(ctx, machine); err != nil {
+		// If the machine is not found, it's already been deleted which is fine
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -342,6 +356,9 @@ func (r *MachineReconciler) updateVMStatus(ctx context.Context, machine *vitista
 		machine.Status.Zone = node
 	}
 
+	// Update disk status from VM config
+	r.updateDiskStatus(ctx, machine, vm)
+
 	if vm.Agent && vm.Status == proxmoxStatusRunning {
 		r.updateNetworkStatus(ctx, machine, vm)
 	}
@@ -415,6 +432,288 @@ func (r *MachineReconciler) updateNetworkStatus(ctx context.Context, machine *vi
 	}
 
 	logger.V(1).Info("Updated network status", "interfaces", len(machine.Status.NetworkInterfaces), "ipv4", allIPv4, "ipv6", allIPv6)
+}
+
+// updateDiskStatus updates disk information from VM configuration
+func (r *MachineReconciler) updateDiskStatus(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine, vm *proxmox.VirtualMachine) {
+	logger := logf.FromContext(ctx)
+
+	if vm.VirtualMachineConfig == nil {
+		logger.V(1).Info("VM config not available, skipping disk status update")
+		return
+	}
+
+	config := vm.VirtualMachineConfig
+
+	// Get all disks from the VM config by merging all disk types
+	scsiDisks := config.MergeSCSIs()
+	virtioDisks := config.MergeVirtIOs()
+	sataDisks := config.MergeSATAs()
+	ideDisks := config.MergeIDEs()
+	unusedDisks := config.MergeUnuseds()
+
+	// Also check raw fields as fallback (the merge functions use reflection which might miss some)
+	rawDisks := make(map[string]string)
+	if config.SCSI0 != "" {
+		rawDisks["scsi0"] = config.SCSI0
+	}
+	if config.SCSI1 != "" {
+		rawDisks["scsi1"] = config.SCSI1
+	}
+	if config.VirtIO0 != "" {
+		rawDisks["virtio0"] = config.VirtIO0
+	}
+	if config.VirtIO1 != "" {
+		rawDisks["virtio1"] = config.VirtIO1
+	}
+	if config.SATA0 != "" {
+		rawDisks["sata0"] = config.SATA0
+	}
+	if config.IDE0 != "" {
+		rawDisks["ide0"] = config.IDE0
+	}
+
+	logger.V(1).Info("Found disks in VM config",
+		"scsi", len(scsiDisks),
+		"virtio", len(virtioDisks),
+		"sata", len(sataDisks),
+		"ide", len(ideDisks),
+		"unused", len(unusedDisks),
+		"rawDisks", len(rawDisks),
+		"scsi0Raw", config.SCSI0,
+		"virtio0Raw", config.VirtIO0)
+
+	machine.Status.Disks = nil
+
+	// Track processed disks to avoid duplicates
+	processed := make(map[string]bool)
+
+	// Process merged disk types
+	for name, diskConfig := range scsiDisks {
+		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
+			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
+			processed[name] = true
+		}
+	}
+	for name, diskConfig := range virtioDisks {
+		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
+			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
+			processed[name] = true
+		}
+	}
+	for name, diskConfig := range sataDisks {
+		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
+			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
+			processed[name] = true
+		}
+	}
+	for name, diskConfig := range ideDisks {
+		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
+			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
+			processed[name] = true
+		}
+	}
+
+	// Process unused disks (important for Talos which boots from ISO into memory)
+	// Unused disks are disks attached to the VM but not currently in use by the OS
+	for name, diskConfig := range unusedDisks {
+		if diskStatus := r.parseUnusedDiskConfig(name, diskConfig); diskStatus != nil {
+			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
+			processed[name] = true
+		}
+	}
+
+	// Process raw disks that weren't found by merge functions
+	for name, diskConfig := range rawDisks {
+		if !processed[name] {
+			if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
+				machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
+			}
+		}
+	}
+
+	logger.V(1).Info("Updated disk status", "disks", len(machine.Status.Disks))
+}
+
+// parseDiskConfig parses a Proxmox disk configuration string into MachineStatusDisk
+// Proxmox disk format: storage:size or storage:volid,key=value,...
+// Examples:
+//   - local-lvm:50
+//   - local-lvm:vm-100-disk-0,size=50G
+//   - local-zfs:vm-100-disk-0,iothread=1,size=32G
+func (r *MachineReconciler) parseDiskConfig(name, config string) *vitistackcrdsv1alpha1.MachineStatusDisk {
+	if config == "" || config == "none" {
+		return nil
+	}
+
+	// Skip CD-ROM/ISO media
+	if strings.Contains(config, "media=cdrom") || strings.Contains(config, ",iso") {
+		return nil
+	}
+
+	diskStatus := &vitistackcrdsv1alpha1.MachineStatusDisk{
+		Name:   name,
+		Device: mapProxmoxDiskToDevice(name),
+	}
+
+	// Parse the disk configuration
+	// Format: storage:volid,key=value,key=value,...
+	parts := strings.SplitN(config, ",", 2)
+	storageVolume := parts[0]
+
+	// Extract storage name and volume
+	storageParts := strings.SplitN(storageVolume, ":", 2)
+	if len(storageParts) >= 1 {
+		diskStatus.Type = storageParts[0] // Storage name as type
+	}
+
+	// Parse key=value pairs
+	if len(parts) > 1 {
+		for kv := range strings.SplitSeq(parts[1], ",") {
+			keyValue := strings.SplitN(kv, "=", 2)
+			if len(keyValue) != 2 {
+				continue
+			}
+			key, value := keyValue[0], keyValue[1]
+			switch key {
+			case "size":
+				diskStatus.Size = parseDiskSize(value)
+			}
+		}
+	}
+
+	// If size wasn't in the options, try to parse from storage:size format
+	if diskStatus.Size == 0 && len(storageParts) == 2 {
+		// Check if the second part is a size (e.g., "50" for 50GB)
+		if size := parseDiskSize(storageParts[1]); size > 0 {
+			diskStatus.Size = size
+		}
+	}
+
+	return diskStatus
+}
+
+// parseUnusedDiskConfig parses an unused disk configuration from Proxmox
+// Unused disks appear when a disk is attached to a VM but not assigned to a controller
+// This is common when booting Talos from ISO - it runs in memory and the disk shows as unused
+// Format: storage:volid (e.g., "local-lvm:vm-100-disk-0")
+func (r *MachineReconciler) parseUnusedDiskConfig(name, config string) *vitistackcrdsv1alpha1.MachineStatusDisk {
+	if config == "" || config == "none" {
+		return nil
+	}
+
+	diskStatus := &vitistackcrdsv1alpha1.MachineStatusDisk{
+		Name:   name,
+		Device: "/dev/sda", // Unused disks will typically become sda when attached to a controller
+		Label:  "unused",   // Mark as unused for identification
+	}
+
+	// Parse the disk configuration
+	// Format: storage:volid
+	storageParts := strings.SplitN(config, ":", 2)
+	if len(storageParts) >= 1 {
+		diskStatus.Type = storageParts[0] // Storage name as type
+	}
+
+	// For unused disks, we need to extract size from the volume ID if possible
+	// The format is typically: storage:vm-VMID-disk-N or storage:vm-VMID-disk-N,size=XG
+	if strings.Contains(config, ",") {
+		parts := strings.SplitN(config, ",", 2)
+		for kv := range strings.SplitSeq(parts[1], ",") {
+			keyValue := strings.SplitN(kv, "=", 2)
+			if len(keyValue) == 2 && keyValue[0] == "size" {
+				diskStatus.Size = parseDiskSize(keyValue[1])
+			}
+		}
+	}
+
+	return diskStatus
+}
+
+// parseDiskSize parses a disk size string to bytes
+// Supports formats: 50G, 50, 1T, 500M
+func parseDiskSize(sizeStr string) int64 {
+	if sizeStr == "" {
+		return 0
+	}
+
+	// Remove any trailing whitespace
+	sizeStr = strings.TrimSpace(sizeStr)
+
+	// Check for unit suffix
+	var multiplier int64 = 1024 * 1024 * 1024 // Default to GB
+	var numStr string
+
+	if strings.HasSuffix(sizeStr, "T") {
+		multiplier = 1024 * 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(sizeStr, "T")
+	} else if strings.HasSuffix(sizeStr, "G") {
+		multiplier = 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(sizeStr, "G")
+	} else if strings.HasSuffix(sizeStr, "M") {
+		multiplier = 1024 * 1024
+		numStr = strings.TrimSuffix(sizeStr, "M")
+	} else if strings.HasSuffix(sizeStr, "K") {
+		multiplier = 1024
+		numStr = strings.TrimSuffix(sizeStr, "K")
+	} else {
+		// Assume it's already in GB if no suffix
+		numStr = sizeStr
+	}
+
+	// Parse the numeric part
+	var size float64
+	if _, err := fmt.Sscanf(numStr, "%f", &size); err != nil {
+		return 0
+	}
+
+	return int64(size * float64(multiplier))
+}
+
+// mapProxmoxDiskToDevice maps a Proxmox disk name (e.g., scsi0, virtio0) to a Linux device path
+// The mapping depends on the disk controller type:
+//   - scsi0, scsi1, ... → /dev/sda, /dev/sdb, ...
+//   - virtio0, virtio1, ... → /dev/vda, /dev/vdb, ...
+//   - sata0, sata1, ... → /dev/sda, /dev/sdb, ...
+//   - ide0, ide1, ... → /dev/sda, /dev/sdb, ...
+func mapProxmoxDiskToDevice(diskName string) string {
+	diskName = strings.ToLower(diskName)
+
+	// Extract the controller type and index
+	var prefix string
+	var indexStr string
+
+	for _, p := range []string{"scsi", "virtio", "sata", "ide"} {
+		if strings.HasPrefix(diskName, p) {
+			prefix = p
+			indexStr = strings.TrimPrefix(diskName, p)
+			break
+		}
+	}
+
+	if prefix == "" {
+		return fmt.Sprintf("/dev/%s", diskName)
+	}
+
+	// Parse the disk index
+	index := 0
+	if indexStr != "" {
+		if _, err := fmt.Sscanf(indexStr, "%d", &index); err != nil {
+			return fmt.Sprintf("/dev/%s", diskName)
+		}
+	}
+
+	// Map to device letter (0=a, 1=b, 2=c, etc.)
+	deviceLetter := string(rune('a' + index))
+
+	// VirtIO uses vd* naming, others use sd*
+	switch prefix {
+	case "virtio":
+		return fmt.Sprintf("/dev/vd%s", deviceLetter)
+	default:
+		// SCSI, SATA, IDE all appear as sd* in modern Linux
+		return fmt.Sprintf("/dev/sd%s", deviceLetter)
+	}
 }
 
 // validateISO checks if the specified ISO exists in Proxmox storage
