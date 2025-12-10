@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/luthermonson/go-proxmox v0.2.3
 	github.com/onsi/ginkgo/v2 v2.27.3
-	github.com/onsi/gomega v1.38.2
+	github.com/onsi/gomega v1.38.3
 	github.com/vitistack/common v0.8.7
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.3
