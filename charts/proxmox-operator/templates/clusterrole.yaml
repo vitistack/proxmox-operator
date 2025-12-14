@@ -1,0 +1,76 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "proxmox-operator.fullname" . }}
+  labels:
+    {{- include "proxmox-operator.labels" . | nindent 4 }}
+rules:
+  # Vitistack CRDs - full access
+  - apiGroups:
+      - vitistack.io
+    resources:
+      - machines
+      - machines/status
+      - machines/finalizers
+      - machineclasses
+      - machineclasses/status
+      - machineproviders
+      - machineproviders/status
+      - networkconfigurations
+      - networkconfigurations/status
+      - networknamespaces
+      - networknamespaces/status
+      - vitistacks
+      - vitistacks/status
+      - kubernetesclusters
+      - kubernetesclusters/status
+      - kubernetesproviders
+      - kubernetesproviders/status
+      - proxmoxconfigs
+      - proxmoxconfigs/status
+      - kubevirtconfigs
+      - kubevirtconfigs/status
+      - etcdbackups
+      - etcdbackups/status
+      - controlplanevirtualsharedips
+      - controlplanevirtualsharedips/status
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Core resources
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  # Coordination for leader election
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+{{- end }}
