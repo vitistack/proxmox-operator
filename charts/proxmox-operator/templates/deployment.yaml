@@ -47,11 +47,10 @@ spec:
           env:
             # Logging configuration
             - name: LOG_LEVEL
-              value: {{ .Values.config.logging.level | quote }}
+              value: {{ .Values.logging.level | quote }}
             - name: LOG_JSON
-              value: {{ .Values.config.logging.json | quote }}
-            # Proxmox connection settings
-            {{- if .Values.existingSecret }}
+              value: {{ .Values.logging.json | quote }}
+            # Proxmox connection settings (from secret)
             - name: PROXMOX_ENDPOINT
               valueFrom:
                 secretKeyRef:
@@ -81,68 +80,46 @@ spec:
                   name: {{ .Values.existingSecret }}
                   key: PROXMOX_TOKEN_SECRET
                   optional: true
-            {{- else }}
-            {{- if .Values.config.proxmox.endpoint }}
-            - name: PROXMOX_ENDPOINT
-              value: {{ .Values.config.proxmox.endpoint | quote }}
-            {{- end }}
-            {{- if .Values.config.proxmox.username }}
-            - name: PROXMOX_USERNAME
-              value: {{ .Values.config.proxmox.username | quote }}
-            {{- end }}
-            {{- if .Values.config.proxmox.password }}
-            - name: PROXMOX_PASSWORD
-              value: {{ .Values.config.proxmox.password | quote }}
-            {{- end }}
-            {{- if .Values.config.proxmox.tokenId }}
-            - name: PROXMOX_TOKEN_ID
-              value: {{ .Values.config.proxmox.tokenId | quote }}
-            {{- end }}
-            {{- if .Values.config.proxmox.tokenSecret }}
-            - name: PROXMOX_TOKEN_SECRET
-              value: {{ .Values.config.proxmox.tokenSecret | quote }}
-            {{- end }}
-            {{- end }}
             - name: PROXMOX_INSECURE_TLS
-              value: {{ .Values.config.proxmox.insecureTLS | quote }}
+              value: {{ .Values.proxmox.insecureTLS | quote }}
             # VM management settings
             - name: PROXMOX_VM_ID_START
-              value: {{ .Values.config.vm.idStart | quote }}
+              value: {{ .Values.vm.idStart | quote }}
             - name: PROXMOX_NODE_SELECTION
-              value: {{ .Values.config.vm.nodeSelection | quote }}
-            {{- if .Values.config.vm.allowedNodes }}
+              value: {{ .Values.vm.nodeSelection | quote }}
+            {{- if .Values.vm.allowedNodes }}
             - name: PROXMOX_ALLOWED_NODES
-              value: {{ .Values.config.vm.allowedNodes | quote }}
+              value: {{ .Values.vm.allowedNodes | quote }}
             {{- end }}
             - name: PROXMOX_DEFAULT_STORAGE
-              value: {{ .Values.config.vm.defaultStorage | quote }}
+              value: {{ .Values.vm.defaultStorage | quote }}
             - name: PROXMOX_DEFAULT_NETWORK
-              value: {{ .Values.config.vm.defaultNetwork | quote }}
+              value: {{ .Values.vm.defaultNetwork | quote }}
             - name: PROXMOX_NETWORK_MODEL
-              value: {{ .Values.config.vm.networkModel | quote }}
-            {{- if .Values.config.vm.defaultVlan }}
+              value: {{ .Values.vm.networkModel | quote }}
+            {{- if .Values.vm.defaultVlan }}
             - name: PROXMOX_DEFAULT_VLAN
-              value: {{ .Values.config.vm.defaultVlan | quote }}
+              value: {{ .Values.vm.defaultVlan | quote }}
             {{- end }}
-            {{- if .Values.config.vm.defaultMtu }}
+            {{- if .Values.vm.defaultMtu }}
             - name: PROXMOX_DEFAULT_MTU
-              value: {{ .Values.config.vm.defaultMtu | quote }}
+              value: {{ .Values.vm.defaultMtu | quote }}
             {{- end }}
             - name: PROXMOX_DEFAULT_CPU_TYPE
-              value: {{ .Values.config.vm.defaultCpuType | quote }}
+              value: {{ .Values.vm.defaultCpuType | quote }}
             - name: PROXMOX_ENABLE_NUMA
-              value: {{ .Values.config.vm.enableNuma | quote }}
+              value: {{ .Values.vm.enableNuma | quote }}
             - name: PROXMOX_SCSI_CONTROLLER
-              value: {{ .Values.config.vm.scsiController | quote }}
+              value: {{ .Values.vm.scsiController | quote }}
             - name: PROXMOX_ENABLE_QEMU_AGENT
-              value: {{ .Values.config.vm.enableQemuAgent | quote }}
+              value: {{ .Values.vm.enableQemuAgent | quote }}
             - name: PROXMOX_START_ON_CREATE
-              value: {{ .Values.config.vm.startOnCreate | quote }}
+              value: {{ .Values.vm.startOnCreate | quote }}
             # Network configuration settings
             - name: IP_SOURCE
-              value: {{ .Values.config.network.ipSource | quote }}
+              value: {{ .Values.network.ipSource | quote }}
             - name: MAC_SET
-              value: {{ .Values.config.network.macSet | quote }}
+              value: {{ .Values.network.macSet | quote }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
