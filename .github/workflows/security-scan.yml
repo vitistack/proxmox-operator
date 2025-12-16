@@ -2,7 +2,7 @@ name: Security Scan
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # Run weekly on Mondays
+    - cron: '0 0 * * 0' # Run weekly on Sundays
 
 jobs:
   security-scan:
