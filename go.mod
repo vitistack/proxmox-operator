@@ -3,7 +3,7 @@ module github.com/vitistack/proxmox-operator
 go 1.25.5
 
 require (
-	github.com/luthermonson/go-proxmox v0.2.4
+	github.com/luthermonson/go-proxmox v0.3.2
 	github.com/onsi/ginkgo/v2 v2.27.3
 	github.com/onsi/gomega v1.38.3
 	github.com/vitistack/common v0.8.26
