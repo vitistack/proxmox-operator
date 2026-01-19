@@ -46,3 +46,5 @@ hack/vitistack-crds/
 
 __debug_bin*
 
+# SBOM output
+sbom/
