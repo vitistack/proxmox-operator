@@ -3,6 +3,7 @@ package initializeservice
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 	"github.com/vitistack/common/pkg/loggers/vlog"
@@ -14,6 +15,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// isSet checks if a string is set (not empty and not just whitespace)
+func isSet(s string) bool {
+	return strings.TrimSpace(s) != ""
+}
 
 func CheckPrerequisites() {
 	vlog.Info("Running prerequisite checks...")
@@ -32,7 +38,15 @@ func CheckPrerequisites() {
 	vlog.Info("✅ Prerequisite checks passed")
 }
 
-func CheckProxmoxConnection() error {
+func CheckProxmoxConnection() (err error) {
+	// Recover from any panics and convert to error
+	defer func() {
+		if r := recover(); r != nil {
+			vlog.Errorf("PANIC recovered during Proxmox connection check: %v", r)
+			err = fmt.Errorf("panic during Proxmox connection check: %v", r)
+		}
+	}()
+
 	vlog.Info("Testing Proxmox connection...")
 
 	endpoint := viper.GetString(consts.PROXMOX_ENDPOINT)
@@ -42,40 +56,57 @@ func CheckProxmoxConnection() error {
 	tokenSecret := viper.GetString(consts.PROXMOX_TOKEN_SECRET)
 	insecure := viper.GetBool(consts.PROXMOX_INSECURE_TLS)
 
-	if endpoint == "" {
+	// Log configuration (no sensitive data, only presence and length)
+	vlog.Infof("Proxmox endpoint set: %v (length: %d)", isSet(endpoint), len(endpoint))
+	vlog.Infof("Proxmox insecure TLS: %v", insecure)
+	vlog.Infof("Proxmox username set: %v (length: %d)", isSet(username), len(username))
+	vlog.Infof("Proxmox password set: %v (length: %d)", isSet(password), len(password))
+	vlog.Infof("Proxmox token ID set: %v (length: %d)", isSet(tokenID), len(tokenID))
+	vlog.Infof("Proxmox token secret set: %v (length: %d)", isSet(tokenSecret), len(tokenSecret))
+
+	if !isSet(endpoint) {
+		vlog.Error("Proxmox endpoint is empty or whitespace only")
 		return fmt.Errorf("proxmox configuration incomplete: endpoint is required")
 	}
 
 	// Check authentication - either username/password or token
-	hasCredentials := username != "" && password != ""
-	hasToken := tokenID != "" && tokenSecret != ""
+	hasCredentials := isSet(username) && isSet(password)
+	hasToken := isSet(tokenID) && isSet(tokenSecret)
+
+	vlog.Infof("Authentication check - hasCredentials: %v, hasToken: %v", hasCredentials, hasToken)
 
 	if !hasCredentials && !hasToken {
+		vlog.Error("No authentication method configured")
 		return fmt.Errorf("proxmox configuration incomplete: either username/password or token authentication is required")
 	}
 
 	if hasCredentials && hasToken {
-		vlog.Info("Both username/password and token provided, using token authentication")
+		vlog.Info("Both credentials and token provided, preferring token authentication")
 	}
 
 	var proxmoxclient proxmox.ProxmoxClient
-	var err error
 
 	if hasToken {
+		vlog.Info("Creating Proxmox client with token authentication...")
 		proxmoxclient, err = proxmox.NewProxmoxClient(
 			proxmox.WithEndpoint(endpoint),
 			proxmox.WithToken(tokenID, tokenSecret),
 			proxmox.WithInsecureTLS(insecure),
 		)
 	} else {
+		vlog.Info("Creating Proxmox client with username/password authentication...")
 		proxmoxclient, err = proxmox.NewProxmoxClientFromConfig(endpoint, username, password, "", "", insecure)
 	}
 
 	if err != nil {
+		vlog.Errorf("Failed to create Proxmox client: %v", err)
 		return fmt.Errorf("failed to create Proxmox client: %w", err)
 	}
 
+	vlog.Info("Proxmox client created, testing connection...")
+
 	if err := proxmoxclient.TestConnection(context.TODO()); err != nil {
+		vlog.Errorf("Failed to connect to Proxmox: %v", err)
 		return fmt.Errorf("failed to connect to Proxmox: %w", err)
 	}
 

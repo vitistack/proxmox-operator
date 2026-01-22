@@ -5,10 +5,18 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/luthermonson/go-proxmox"
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackcrdsv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 )
+
+// isSet checks if a string is set (not empty and not just whitespace)
+func isSet(s string) bool {
+	return strings.TrimSpace(s) != ""
+}
 
 // ClientOption is a functional option for configuring the Proxmox client
 type ClientOption func(*clientConfig)
@@ -71,49 +79,64 @@ type proxmoxClient struct {
 
 // NewProxmoxClient creates a new Proxmox client using functional options
 func NewProxmoxClient(opts ...ClientOption) (ProxmoxClient, error) {
+	vlog.Info("NewProxmoxClient: initializing client configuration...")
 	config := &clientConfig{}
 
 	for _, opt := range opts {
 		opt(config)
 	}
 
+	vlog.Infof("NewProxmoxClient: endpoint set=%v (length: %d), insecure=%v", isSet(config.endpoint), len(config.endpoint), config.insecure)
+	vlog.Infof("NewProxmoxClient: username set=%v (length: %d), password set=%v (length: %d)", isSet(config.username), len(config.username), isSet(config.password), len(config.password))
+	vlog.Infof("NewProxmoxClient: tokenID set=%v (length: %d), tokenSecret set=%v (length: %d)", isSet(config.tokenID), len(config.tokenID), isSet(config.tokenSecret), len(config.tokenSecret))
+
 	// Validate required fields
-	if config.endpoint == "" {
+	if !isSet(config.endpoint) {
+		vlog.Error("NewProxmoxClient: endpoint is empty or whitespace")
 		return nil, fmt.Errorf("endpoint is required")
 	}
-	if config.tokenID == "" && config.username == "" {
+	if !isSet(config.tokenID) && !isSet(config.username) {
+		vlog.Error("NewProxmoxClient: no authentication configured")
 		return nil, fmt.Errorf("authentication is required (either token or username/password)")
 	}
 
 	var clientOpts []proxmox.Option
 
 	// Set up authentication
-	if config.tokenID != "" && config.tokenSecret != "" {
+	if isSet(config.tokenID) && isSet(config.tokenSecret) {
+		vlog.Info("NewProxmoxClient: using token authentication")
 		clientOpts = append(clientOpts, proxmox.WithAPIToken(config.tokenID, config.tokenSecret))
-	} else if config.username != "" && config.password != "" {
+	} else if isSet(config.username) && isSet(config.password) {
+		vlog.Info("NewProxmoxClient: using credentials authentication")
 		credentials := proxmox.Credentials{
 			Username: config.username,
 			Password: config.password,
 		}
 		clientOpts = append(clientOpts, proxmox.WithCredentials(&credentials))
 	} else {
+		vlog.Error("NewProxmoxClient: incomplete authentication credentials")
 		return nil, fmt.Errorf("either token (ID and secret) or username/password must be provided")
 	}
 
-	// Set up HTTP client for TLS config
+	// Set up HTTP client with timeout and TLS config
+	vlog.Info("NewProxmoxClient: configuring HTTP client with 15s timeout...")
+	httpClient := &http.Client{
+		Timeout: 15 * time.Second, // Prevent hanging connections
+	}
 	if config.insecure {
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, // #nosec G402
-				},
+		vlog.Info("NewProxmoxClient: TLS verification disabled (insecure mode)")
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // #nosec G402
 			},
 		}
-		clientOpts = append(clientOpts, proxmox.WithHTTPClient(httpClient))
 	}
+	clientOpts = append(clientOpts, proxmox.WithHTTPClient(httpClient))
 
+	vlog.Info("NewProxmoxClient: creating Proxmox client...")
 	client := proxmox.NewClient(config.endpoint, clientOpts...)
 
+	vlog.Info("NewProxmoxClient: client created successfully")
 	return &proxmoxClient{
 		client: client,
 	}, nil
@@ -235,8 +258,14 @@ func (c *proxmoxClient) GetNodeNames(ctx context.Context) ([]string, error) {
 }
 
 func (c *proxmoxClient) TestConnection(ctx context.Context) error {
-	_, err := c.client.Nodes(ctx)
-	return err
+	vlog.Info("TestConnection: calling Nodes() API...")
+	nodes, err := c.client.Nodes(ctx)
+	if err != nil {
+		vlog.Errorf("TestConnection: Nodes() API failed: %v", err)
+		return err
+	}
+	vlog.Infof("TestConnection: successfully retrieved %d nodes", len(nodes))
+	return nil
 }
 
 func (c *proxmoxClient) Client() *proxmox.Client {
