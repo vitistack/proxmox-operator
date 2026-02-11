@@ -43,16 +43,6 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Cache golangci-lint
-        uses: actions/cache@v5
-        with:
-          path: |
-            bin/golangci-lint*
-            ~/.cache/golangci-lint
-          key: ${{ runner.os }}-golangci-lint-${{ hashFiles('go.mod') }}
-          restore-keys: |
-            ${{ runner.os }}-golangci-lint-
-
       - name: Lint
         run: make lint
 
@@ -113,16 +103,6 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
           cache-dependency-path: go.sum
-
-      - name: Cache security tools
-        uses: actions/cache@v5
-        with:
-          path: |
-            bin/gosec*
-            bin/govulncheck*
-          key: ${{ runner.os }}-security-tools-${{ hashFiles('go.mod') }}
-          restore-keys: |
-            ${{ runner.os }}-security-tools-
 
       - name: Run gosec
         run: make gosec

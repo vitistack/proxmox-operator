@@ -46,7 +46,7 @@ func NewBuilder() *Builder {
 
 // BuildOptions builds Proxmox VM options from Machine and MachineClass specs
 func (b *Builder) BuildOptions(machine *vitistackcrdsv1alpha1.Machine, machineClass *vitistackcrdsv1alpha1.MachineClass, netConfig NetworkConfig) []proxmox.VirtualMachineOption {
-	options := []proxmox.VirtualMachineOption{}
+	options := make([]proxmox.VirtualMachineOption, 0, 6)
 
 	options = append(options, b.buildCPUOptions(machine, machineClass)...)
 	options = append(options, b.buildMemoryOptions(machine, machineClass)...)
