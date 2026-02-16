@@ -31,7 +31,7 @@ A Kubernetes operator for managing Proxmox Virtual Environment (VE) virtual mach
 - Kubernetes cluster (v1.19+)
 - Proxmox Virtual Environment (v6.0+)
 - [vitistack/common](https://github.com/vitistack/common) CRDs installed
-- Go 1.25+ (for development)
+- Go 1.26+ (for development)
 
 ## 🛠️ Installation
 
@@ -333,7 +333,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ### Code Standards
 
-- Go 1.25+ compatible
+- Go 1.26+ compatible
 - Follow standard Go formatting (`gofmt`)
 - Comprehensive test coverage
 - Security-first approach (passes `gosec`)
