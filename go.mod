@@ -3,10 +3,10 @@ module github.com/vitistack/proxmox-operator
 go 1.26.0
 
 require (
-	github.com/luthermonson/go-proxmox v0.3.2
+	github.com/luthermonson/go-proxmox v0.4.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/vitistack/common v0.8.39
+	github.com/vitistack/common v0.8.40
 	k8s.io/apimachinery v0.35.1
 	k8s.io/client-go v0.35.1
 	sigs.k8s.io/controller-runtime v0.23.1
