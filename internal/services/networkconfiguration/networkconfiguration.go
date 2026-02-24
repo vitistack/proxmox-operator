@@ -165,10 +165,3 @@ func (m *Manager) Delete(ctx context.Context, machine *vitistackcrdsv1alpha1.Mac
 	logger.Info("Deleted NetworkConfiguration", "name", machine.Name)
 	return nil
 }
-
-// boolPtr returns a pointer to a bool value
-//
-//go:fix inline
-func boolPtr(b bool) *bool {
-	return new(b)
-}
