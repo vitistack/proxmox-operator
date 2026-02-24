@@ -9,14 +9,14 @@ spec:
     family: linux
     distribution: talos
     version: "1.11.5"
-    imageID: "local:iso/talos-v1.11.5-nocloud-amd64.iso"
+    imageID: "cephfsExternal:iso/metal-amd64.iso"
   network:
     assignPublicIP: false
     interfaces:
-    - name: eth0
-      primary: true
+      - name: eth0
+        primary: true
   disks:
-  - name: root
-    sizeGB: 10
-    boot: true
+    - name: root
+      sizeGB: 10
+      boot: true
   provider: proxmox

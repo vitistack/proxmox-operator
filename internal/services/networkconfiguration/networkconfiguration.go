@@ -92,8 +92,8 @@ func (m *Manager) Create(ctx context.Context, machine *vitistackcrdsv1alpha1.Mac
 					Kind:               machine.Kind,
 					Name:               machine.Name,
 					UID:                machine.UID,
-					Controller:         boolPtr(true),
-					BlockOwnerDeletion: boolPtr(true),
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
 				},
 			},
 		},
@@ -167,6 +167,8 @@ func (m *Manager) Delete(ctx context.Context, machine *vitistackcrdsv1alpha1.Mac
 }
 
 // boolPtr returns a pointer to a bool value
+//
+//go:fix inline
 func boolPtr(b bool) *bool {
-	return &b
+	return new(b)
 }

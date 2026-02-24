@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -90,11 +91,8 @@ func (s *Selector) filterAllowedNodes(nodeNames []string) []string {
 
 	var candidateNodes []string
 	for _, node := range nodeNames {
-		for _, allowed := range allowedNodes {
-			if node == allowed {
-				candidateNodes = append(candidateNodes, node)
-				break
-			}
+		if slices.Contains(allowedNodes, node) {
+			candidateNodes = append(candidateNodes, node)
 		}
 	}
 
@@ -102,7 +100,7 @@ func (s *Selector) filterAllowedNodes(nodeNames []string) []string {
 }
 
 // selectByStrategy selects a node based on the given strategy
-func (s *Selector) selectByStrategy(strategy Strategy, candidateNodes []string, logger interface{ Info(string, ...interface{}) }) string {
+func (s *Selector) selectByStrategy(strategy Strategy, candidateNodes []string, logger interface{ Info(string, ...any) }) string {
 	switch strategy {
 	case StrategyFirst:
 		return candidateNodes[0]
