@@ -68,7 +68,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -118,14 +118,14 @@ jobs:
         run: make sbom-source SBOM_OUTPUT_DIR=.
 
       - name: Upload chart artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: helm-chart
           path: proxmox-operator-*.tgz
           retention-days: 1
 
       - name: Upload source SBOM artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-source
           path: |
@@ -210,7 +210,7 @@ jobs:
           cosign attach sbom --sbom sbom-container.cdx.json ${{ env.IMAGE_NAME }}:${{ needs.package-helm.outputs.version }}
 
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-container
           path: |
