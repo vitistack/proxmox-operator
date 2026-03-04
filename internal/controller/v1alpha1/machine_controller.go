@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/luthermonson/go-proxmox"
@@ -59,6 +60,10 @@ const (
 	proxmoxStatusSuspended = "suspended"
 	proxmoxStatusPrelaunch = "prelaunch"
 )
+
+// deprecationWarned tracks namespaces for which the deprecation warning has already been logged,
+// so we don't spam the logs on every reconcile loop.
+var deprecationWarned sync.Map
 
 // MachineReconciler reconciles a Machine object
 type MachineReconciler struct {
@@ -775,31 +780,52 @@ func (r *MachineReconciler) generateVMID(machine *vitistackcrdsv1alpha1.Machine)
 }
 
 // getVLANTag determines the VLAN tag for a machine
-// Priority: NetworkNamespace in machine's namespace -> Default VLAN env var -> 0 (no VLAN)
+// Priority: Machine spec networkNamespaceName -> List first NetworkNamespace in namespace (legacy) -> Default VLAN env var -> 0 (no VLAN)
 func (r *MachineReconciler) getVLANTag(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) int {
 	logger := logf.FromContext(ctx)
 	defaultVLAN := viper.GetInt(consts.PROXMOX_DEFAULT_VLAN)
 
-	// List NetworkNamespaces in the machine's namespace
-	var networkNamespaceList vitistackcrdsv1alpha1.NetworkNamespaceList
-	if err := r.List(ctx, &networkNamespaceList, client.InNamespace(machine.Namespace)); err != nil {
-		logger.Info("Failed to list NetworkNamespaces, using default VLAN",
-			"namespace", machine.Namespace,
-			"defaultVLAN", defaultVLAN,
-			"error", err.Error())
-		return defaultVLAN
-	}
+	var networkNamespace *vitistackcrdsv1alpha1.NetworkNamespace
 
-	// Check if any NetworkNamespace exists in the namespace
-	if len(networkNamespaceList.Items) == 0 {
-		logger.Info("No NetworkNamespace found in namespace, using default VLAN",
-			"namespace", machine.Namespace,
-			"defaultVLAN", defaultVLAN)
-		return defaultVLAN
-	}
+	// If the machine spec has a specific NetworkNamespace name, look it up directly
+	if machine.Spec.Network.NetworkNamespaceName != "" {
+		nn := &vitistackcrdsv1alpha1.NetworkNamespace{}
+		if err := r.Get(ctx, client.ObjectKey{Name: machine.Spec.Network.NetworkNamespaceName, Namespace: machine.Namespace}, nn); err != nil {
+			logger.Info("Failed to get specified NetworkNamespace, using default VLAN",
+				"namespace", machine.Namespace,
+				"networkNamespaceName", machine.Spec.Network.NetworkNamespaceName,
+				"defaultVLAN", defaultVLAN,
+				"error", err.Error())
+			return defaultVLAN
+		}
+		networkNamespace = nn
+	} else {
+		// Fallback: list all NetworkNamespaces in the namespace and use the first one (legacy behavior)
+		if _, alreadyWarned := deprecationWarned.LoadOrStore(machine.Namespace, true); !alreadyWarned {
+			logger.Info("WARNING: networkNamespaceName not set on Machine spec, falling back to listing NetworkNamespaces. "+
+				"Please set spec.network.networkNamespaceName on the Machine resource or spec.data.networkNamespaceName on the KubernetesCluster.",
+				"namespace", machine.Namespace,
+				"machine", machine.Name)
+		}
 
-	// Use the first NetworkNamespace (typically there's one per namespace)
-	networkNamespace := networkNamespaceList.Items[0]
+		var networkNamespaceList vitistackcrdsv1alpha1.NetworkNamespaceList
+		if err := r.List(ctx, &networkNamespaceList, client.InNamespace(machine.Namespace)); err != nil {
+			logger.Info("Failed to list NetworkNamespaces, using default VLAN",
+				"namespace", machine.Namespace,
+				"defaultVLAN", defaultVLAN,
+				"error", err.Error())
+			return defaultVLAN
+		}
+
+		if len(networkNamespaceList.Items) == 0 {
+			logger.Info("No NetworkNamespace found in namespace, using default VLAN",
+				"namespace", machine.Namespace,
+				"defaultVLAN", defaultVLAN)
+			return defaultVLAN
+		}
+
+		networkNamespace = &networkNamespaceList.Items[0]
+	}
 
 	// Check if VLAN ID is set in the NetworkNamespace status
 	if networkNamespace.Status.VlanID == 0 {

@@ -98,9 +98,10 @@ func (m *Manager) Create(ctx context.Context, machine *vitistackcrdsv1alpha1.Mac
 			},
 		},
 		Spec: vitistackcrdsv1alpha1.NetworkConfigurationSpec{
-			Name:              machine.Name,
-			Provider:          "proxmox",
-			NetworkInterfaces: []vitistackcrdsv1alpha1.NetworkConfigurationInterface{netInterface},
+			NetworkNamespaceName: machine.Spec.Network.NetworkNamespaceName,
+			Name:                 machine.Name,
+			Provider:             "proxmox",
+			NetworkInterfaces:    []vitistackcrdsv1alpha1.NetworkConfigurationInterface{netInterface},
 		},
 	}
 
