@@ -781,6 +781,7 @@ func (r *MachineReconciler) generateVMID(machine *vitistackcrdsv1alpha1.Machine)
 
 // getVLANTag determines the VLAN tag for a machine
 // Priority: Machine spec networkNamespaceName -> List first NetworkNamespace in namespace (legacy) -> Default VLAN env var -> 0 (no VLAN)
+// A NetworkNamespace with Status.VlanID == 0 is treated as "no VLAN" (untagged bridge) and the default VLAN env var is NOT applied.
 func (r *MachineReconciler) getVLANTag(ctx context.Context, machine *vitistackcrdsv1alpha1.Machine) int {
 	logger := logf.FromContext(ctx)
 	defaultVLAN := viper.GetInt(consts.PROXMOX_DEFAULT_VLAN)
@@ -825,15 +826,6 @@ func (r *MachineReconciler) getVLANTag(ctx context.Context, machine *vitistackcr
 		}
 
 		networkNamespace = &networkNamespaceList.Items[0]
-	}
-
-	// Check if VLAN ID is set in the NetworkNamespace status
-	if networkNamespace.Status.VlanID == 0 {
-		logger.Info("NetworkNamespace has no VLAN ID set, using default VLAN",
-			"namespace", machine.Namespace,
-			"networkNamespace", networkNamespace.Name,
-			"defaultVLAN", defaultVLAN)
-		return defaultVLAN
 	}
 
 	logger.V(1).Info("Using VLAN from NetworkNamespace",

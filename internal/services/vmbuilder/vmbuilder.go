@@ -174,13 +174,10 @@ func (b *Builder) buildNetworkOptions(machine *vitistackcrdsv1alpha1.Machine, ne
 			netValue = fmt.Sprintf("%s,macaddr=%s", netValue, netConfig.MACAddress)
 		}
 
-		// Add VLAN tag if specified (from config or default)
-		vlanTag := netConfig.VLAN
-		if vlanTag == 0 {
-			vlanTag = viper.GetInt(consts.PROXMOX_DEFAULT_VLAN)
-		}
-		if vlanTag > 0 {
-			netValue = fmt.Sprintf("%s,tag=%d", netValue, vlanTag)
+		// Add VLAN tag if specified; 0 means untagged (no tag= parameter).
+		// The caller is responsible for resolving any default VLAN policy.
+		if netConfig.VLAN > 0 {
+			netValue = fmt.Sprintf("%s,tag=%d", netValue, netConfig.VLAN)
 		}
 
 		// Add MTU if specified (from config or default, 0 means use Proxmox default)
