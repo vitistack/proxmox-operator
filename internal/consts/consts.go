@@ -12,6 +12,10 @@ const (
 	VITISTACK_NAME          = "VITISTACK_NAME"
 	NAME_MACHINE_PROVIDER   = "NAME_MACHINE_PROVIDER"
 
+	// MAX_CONCURRENT_RECONCILES is the maximum number of Machine
+	// reconciliations that run in parallel. Default: 5.
+	MAX_CONCURRENT_RECONCILES = "MAX_CONCURRENT_RECONCILES"
+
 	// Proxmox settings
 	PROXMOX_ENDPOINT          = "PROXMOX_ENDPOINT"
 	PROXMOX_USERNAME          = "PROXMOX_USERNAME"

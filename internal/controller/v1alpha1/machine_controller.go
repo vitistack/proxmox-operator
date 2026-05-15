@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -269,11 +270,18 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	}
 
+	maxConcurrent := viper.GetInt(consts.MAX_CONCURRENT_RECONCILES)
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
+	}
+	logf.Log.Info(fmt.Sprintf("proxmox-machine controller max concurrent reconciles: %d", maxConcurrent))
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackcrdsv1alpha1.Machine{}).
 		WithEventFilter(proxmoxMachinePredicate).
 		Watches(&vitistackcrdsv1alpha1.MachineClass{}, &handler.EnqueueRequestForObject{}).
 		Owns(&vitistackcrdsv1alpha1.NetworkConfiguration{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrent}).
 		Named("proxmox-machine").
 		Complete(r)
 }

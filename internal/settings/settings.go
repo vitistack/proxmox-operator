@@ -20,6 +20,7 @@ func Init() {
 	viper.SetDefault(consts.LOG_LEVEL, "info")
 	viper.SetDefault(consts.IP_SOURCE, "proxmox")
 	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "proxmox-provider")
+	viper.SetDefault(consts.MAX_CONCURRENT_RECONCILES, 5)
 
 	// Proxmox settings (no defaults - must be configured)
 	viper.SetDefault(consts.PROXMOX_INSECURE_TLS, false)
