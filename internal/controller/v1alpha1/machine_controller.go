@@ -458,72 +458,44 @@ func (r *MachineReconciler) updateDiskStatus(ctx context.Context, machine *vitis
 
 	config := vm.VirtualMachineConfig
 
-	// Get all disks from the VM config by merging all disk types
-	scsiDisks := config.MergeSCSIs()
-	virtioDisks := config.MergeVirtIOs()
-	sataDisks := config.MergeSATAs()
-	ideDisks := config.MergeIDEs()
-	unusedDisks := config.MergeUnuseds()
-
-	// Also check raw fields as fallback (the merge functions use reflection which might miss some)
-	rawDisks := make(map[string]string)
-	if config.SCSI0 != "" {
-		rawDisks["scsi0"] = config.SCSI0
-	}
-	if config.SCSI1 != "" {
-		rawDisks["scsi1"] = config.SCSI1
-	}
-	if config.VirtIO0 != "" {
-		rawDisks["virtio0"] = config.VirtIO0
-	}
-	if config.VirtIO1 != "" {
-		rawDisks["virtio1"] = config.VirtIO1
-	}
-	if config.SATA0 != "" {
-		rawDisks["sata0"] = config.SATA0
-	}
-	if config.IDE0 != "" {
-		rawDisks["ide0"] = config.IDE0
-	}
+	// Get all disks from the VM config. In go-proxmox v0.7.x the indexed
+	// device maps (keyed by their on-the-wire name, e.g. "scsi0") are the
+	// authoritative source and are populated directly from the API JSON, so
+	// no scalar-field fallback is needed.
+	scsiDisks := config.SCSIs
+	virtioDisks := config.VirtIOs
+	sataDisks := config.SATAs
+	ideDisks := config.IDEs
+	unusedDisks := config.Unuseds
 
 	logger.V(1).Info("Found disks in VM config",
 		"scsi", len(scsiDisks),
 		"virtio", len(virtioDisks),
 		"sata", len(sataDisks),
 		"ide", len(ideDisks),
-		"unused", len(unusedDisks),
-		"rawDisks", len(rawDisks),
-		"scsi0Raw", config.SCSI0,
-		"virtio0Raw", config.VirtIO0)
+		"unused", len(unusedDisks))
 
 	machine.Status.Disks = nil
-
-	// Track processed disks to avoid duplicates
-	processed := make(map[string]bool)
 
 	// Process merged disk types
 	for name, diskConfig := range scsiDisks {
 		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
 			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
-			processed[name] = true
 		}
 	}
 	for name, diskConfig := range virtioDisks {
 		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
 			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
-			processed[name] = true
 		}
 	}
 	for name, diskConfig := range sataDisks {
 		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
 			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
-			processed[name] = true
 		}
 	}
 	for name, diskConfig := range ideDisks {
 		if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
 			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
-			processed[name] = true
 		}
 	}
 
@@ -532,16 +504,6 @@ func (r *MachineReconciler) updateDiskStatus(ctx context.Context, machine *vitis
 	for name, diskConfig := range unusedDisks {
 		if diskStatus := r.parseUnusedDiskConfig(name, diskConfig); diskStatus != nil {
 			machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
-			processed[name] = true
-		}
-	}
-
-	// Process raw disks that weren't found by merge functions
-	for name, diskConfig := range rawDisks {
-		if !processed[name] {
-			if diskStatus := r.parseDiskConfig(name, diskConfig); diskStatus != nil {
-				machine.Status.Disks = append(machine.Status.Disks, *diskStatus)
-			}
 		}
 	}
 
