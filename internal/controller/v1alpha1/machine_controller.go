@@ -272,7 +272,7 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	maxConcurrent := viper.GetInt(consts.MAX_CONCURRENT_RECONCILES)
 	if maxConcurrent < 1 {
-		maxConcurrent = 1
+		maxConcurrent = 5
 	}
 	logf.Log.Info(fmt.Sprintf("proxmox-machine controller max concurrent reconciles: %d", maxConcurrent))
 

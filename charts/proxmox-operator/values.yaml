@@ -5,6 +5,11 @@
 # This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
 replicaCount: 1
 
+# Maximum number of objects reconciled in parallel per controller (env var
+# MAX_CONCURRENT_RECONCILES). The workqueue serializes by object key, so this
+# only parallelizes across distinct objects, never the same one. Defaults to 5.
+maxConcurrentReconciles: 5
+
 # This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
 image:
   repository: ghcr.io/vitistack/viti-proxmox-operator
@@ -82,10 +87,10 @@ ingress:
 
 resources:
   limits:
-    cpu: 500m
+    cpu: 2000m
     memory: 256Mi
   requests:
-    cpu: 50m
+    cpu: 250m
     memory: 64Mi
 
 # This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
