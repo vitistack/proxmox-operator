@@ -226,7 +226,7 @@ func (c *proxmoxClient) DeleteVM(ctx context.Context, node string, vmID int) (*p
 	if err != nil {
 		return nil, err
 	}
-	return vm.Delete(ctx)
+	return vm.Delete(ctx, nil)
 }
 
 func (c *proxmoxClient) StartVM(ctx context.Context, node string, vmID int) (*proxmox.Task, error) {
